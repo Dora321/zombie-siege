@@ -6,10 +6,9 @@ REMOTE=$(git remote get-url origin)
 NAME=$(git config user.name)
 EMAIL=$(git config user.email)
 
+rm -rf build/web
 mkdir -p build/web
 touch build/.gdignore
-rm -rf build/web
-mkdir build/web
 godot --headless --path . --export-release "Web" build/web/index.html
 touch build/web/.nojekyll
 
@@ -19,5 +18,6 @@ git add -A
 git -c user.name="$NAME" -c user.email="$EMAIL" commit -q -m "Deploy web build
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-git push -q -f "$REMOTE" gh-pages
+# wasm 很大，一次性发送，走代理时分块上传容易 408
+git -c http.postBuffer=524288000 push -q -f "$REMOTE" gh-pages
 rm -rf .git

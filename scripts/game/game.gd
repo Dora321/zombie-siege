@@ -170,8 +170,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _notification(what: int) -> void:
-	# 切走窗口时自动暂停，避免回来时基地已经没了
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and Harness.bot == null and is_node_ready():
+	# 切走窗口时自动暂停，避免回来时基地已经没了。网页版只发窗口焦点通知
+	if (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT) and Harness.bot == null and is_node_ready():
 		if state == State.COMBAT or state == State.COUNTDOWN:
 			pause_ui.open()
 
