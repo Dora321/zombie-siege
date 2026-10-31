@@ -6,7 +6,7 @@ const POOL_SIZE := 18
 ## 同一音效的最短触发间隔（毫秒），避免冲锋枪和成群僵尸把声音叠爆。
 const MIN_GAP_MS := {
 	"hit": 45, "groan": 500, "casing": 60, "wall_hit": 110, "coin": 40, "smg": 40,
-	"turret": 70, "base_hit": 160, "ui_hover": 40,
+	"turret": 70, "base_hit": 160, "ui_hover": 40, "flamer": 75, "arc": 60, "cryo": 60, "beep": 90,
 }
 
 var _streams := {}
@@ -204,6 +204,70 @@ func _build_sfx() -> void:
 	b = _voice(b, 0, 0.07, 8000, 2800, "noise", 0.3)
 	b = _voice(b, 0, 0.06, 980, 320, "sq", 0.16)
 	_add("turret", b)
+
+	b = _buf(0.5)
+	b = _voice(b, 0, 0.42, 9000, 500, "noise", 0.85, 2.4)
+	b = _voice(b, 0, 0.2, 1500, 110, "saw", 0.4)
+	b = _voice(b, 0.02, 0.4, 95, 34, "sin", 0.8, 2.0)
+	_add("sniper", b)
+
+	b = _buf(0.12)
+	b = _voice(b, 0, 0.12, 2100, 1300, "noise", 0.3, 0.8)
+	b = _voice(b, 0, 0.12, 300, 220, "noise", 0.28, 0.8)
+	_add("flamer", b)
+
+	b = _buf(0.3)
+	b = _voice(b, 0, 0.1, 1200, 300, "noise", 0.5)
+	b = _voice(b, 0, 0.24, 230, 70, "sin", 0.8, 2.0)
+	_add("launcher", b)
+
+	b = _buf(0.16)
+	b = _voice(b, 0, 0.14, 5200, 2200, "saw", 0.22, 1.5, 0.3)
+	b = _voice(b, 0, 0.14, 7000, 3000, "noise", 0.24)
+	_add("arc", b)
+
+	b = _buf(0.14)
+	b = _voice(b, 0, 0.12, 3400, 5200, "sin", 0.14)
+	b = _voice(b, 0, 0.1, 9000, 6000, "noise", 0.18)
+	_add("cryo", b)
+
+	b = _buf(0.28)
+	b = _voice(b, 0, 0.26, 700, 2100, "noise", 0.28, 1.2)
+	_add("boomerang", b)
+
+	b = _buf(0.18)
+	b = _voice(b, 0, 0.16, 500, 1500, "noise", 0.26, 1.4)
+	_add("throw", b)
+
+	b = _buf(0.05)
+	b = _voice(b, 0, 0.04, 1760, 1760, "sq", 0.16)
+	_add("beep", b)
+
+	b = _buf(0.7)
+	b = _voice(b, 0, 0.1, 9000, 7000, "noise", 0.75, 1.0)
+	b = _voice(b, 0, 0.65, 4200, 3900, "sin", 0.3, 2.0)
+	_add("flashbang", b)
+
+	b = _buf(0.4)
+	b = _voice(b, 0, 0.14, 660, 880, "sq", 0.16, 0.6)
+	b = _voice(b, 0.2, 0.14, 660, 880, "sq", 0.16, 0.6)
+	_add("decoy", b)
+
+	b = _buf(0.3)
+	b = _voice(b, 0, 0.28, 520, 1300, "sin", 0.26, 1.2)
+	b = _voice(b, 0.08, 0.2, 1040, 1800, "tri", 0.12)
+	_add("potion", b)
+
+	b = _buf(0.2)
+	b = _voice(b, 0, 0.08, 1500, 900, "noise", 0.4)
+	b = _voice(b, 0.02, 0.16, 1250, 1180, "sq", 0.14)
+	_add("armor", b)
+
+	b = _buf(1.8)
+	b = _voice(b, 0, 1.7, 2600, 70, "noise", 1.0, 1.2)
+	b = _voice(b, 0, 1.6, 90, 20, "sin", 1.0, 1.0)
+	b = _voice(b, 0, 0.5, 1800, 200, "saw", 0.3)
+	_add("nuke", b)
 
 	b = _buf(0.26)
 	b = _voice(b, 0, 0.04, 5000, 2500, "noise", 0.4)

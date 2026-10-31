@@ -5,6 +5,7 @@ const W := 480
 const H := 270
 const COL_HP := Color("#d83838")
 const COL_BASE := Color("#5a90d0")
+const COL_ARMOR := Color("#c8d4e8")
 const COL_DIM := Color(0, 0, 0, 0.55)
 
 var game: Node
@@ -15,6 +16,8 @@ var _announce_dur := 1.0
 var _hurt := 0.0
 var _alert_t := 0.0
 var _shown_coins := 0
+var _flash_a := 0.0
+var _flash_color := Color.WHITE
 
 
 func setup(g: Node) -> void:
@@ -42,10 +45,17 @@ func alert_base() -> void:
 	_alert_t = 2.0
 
 
+## 闪光弹和核弹的全屏白闪。
+func screen_flash(strength: float, color: Color) -> void:
+	_flash_a = maxf(_flash_a, strength)
+	_flash_color = color
+
+
 func _process(dt: float) -> void:
 	_announce_t -= dt
 	_hurt = maxf(_hurt - dt, 0.0)
 	_alert_t = maxf(_alert_t - dt, 0.0)
+	_flash_a = maxf(_flash_a - dt * 2.2, 0.0)
 	if game != null:
 		_shown_coins = int(move_toward(_shown_coins, game.coins, maxf(1.0, dt * 200.0)))
 	queue_redraw()
@@ -61,8 +71,11 @@ func _draw() -> void:
 		_draw_wave_info()
 		_draw_money()
 		_draw_weapons()
+		_draw_items()
 		_draw_minimap()
 		_draw_base_pointer()
+	if _flash_a > 0.0:
+		draw_rect(Rect2(0, 0, W, H), Color(_flash_color.r, _flash_color.g, _flash_color.b, minf(_flash_a, 0.9)))
 	if _announce_t > 0.0 and not get_tree().paused:
 		_draw_announce()
 	if _alert_t > 0.0 and int(_alert_t * 5.0) % 2 == 0 and not in_shop:
@@ -87,13 +100,32 @@ func _draw_status() -> void:
 	var b: Variant = game.base
 	draw_texture(Art.heart_tex, Vector2(4, 3))
 	_bar(Rect2(15, 5, 74, 6), p.hp / p.max_hp, COL_HP if p.hp > p.max_hp * 0.3 or int(game.time_alive * 6.0) % 2 == 0 else Color("#ff9070"))
-	Art.draw_tiny(self, "%d/%d" % [roundi(p.hp), roundi(p.max_hp)], Vector2(92, 5), Color("#ffb0a0"))
+	var hp_txt := "%d/%d" % [roundi(p.hp), roundi(p.max_hp)]
+	Art.draw_tiny(self, hp_txt, Vector2(92, 5), Color("#ffb0a0"))
+	# 护甲：盖在血条上半部分
+	if p.armor > 0.0:
+		draw_rect(Rect2(15, 5, roundf(74.0 * p.armor / GameData.ARMOR_MAX), 2), COL_ARMOR)
+		Art.draw_tiny(self, "+%d" % ceili(p.armor), Vector2(94 + Art.tiny_width(hp_txt), 5), COL_ARMOR)
 	draw_texture(Art.shield_tex, Vector2(4, 14))
 	_bar(Rect2(15, 16, 74, 6), b.hp / b.max_hp, COL_BASE)
 	Art.draw_tiny(self, "%d/%d" % [roundi(b.hp), roundi(b.max_hp)], Vector2(92, 16), Color("#a0c8ff"))
 	# 冲刺冷却
 	var dash_ratio: float = 1.0 - clampf(p.dash_cd / p.dash_cd_base, 0.0, 1.0)
 	_bar(Rect2(15, 26, 36, 2), dash_ratio, Color("#60d0e0") if dash_ratio >= 1.0 else Color("#3a7a88"))
+	_draw_buffs(p)
+
+
+## 生效中的药水：图标加剩余时间条。
+func _draw_buffs(p: Variant) -> void:
+	var y := 32
+	for buff: Array in [["speed", p.buff_speed_t], ["damage", p.buff_damage_t], ["inf_ammo", p.buff_ammo_t]]:
+		var left: float = buff[1]
+		if left <= 0.0:
+			continue
+		var id: String = buff[0]
+		draw_texture(Art.item_tex[id], Vector2(3, y))
+		_bar(Rect2(15, y + 4, 30, 2), left / float(GameData.ITEMS[id]["power"]), Color("#f0d050"))
+		y += 11
 
 
 func _draw_wave_info() -> void:
@@ -127,32 +159,65 @@ func _draw_money() -> void:
 
 func _draw_weapons() -> void:
 	var p: Variant = game.player
+	# 只显示已解锁的枪；当前武器的格子宽一些，放得下完整弹药数
+	var owned: Array[String] = p.owned_weapons()
 	var slot_w := 62
-	var total := slot_w * 3 + 8
-	var x0 := (W - total) / 2
+	var mini_w := 32
+	var total := slot_w + (owned.size() - 1) * (mini_w + 2)
+	var x := (W - total) / 2
 	var y0 := H - 24
-	for i in 3:
-		var id: String = GameData.WEAPON_ORDER[i]
+	for id: String in owned:
 		var st: Dictionary = p.weapon_state[id]
 		var selected: bool = id == p.weapon_id
-		var rect := Rect2(x0 + i * (slot_w + 4), y0, slot_w, 21)
+		var w := slot_w if selected else mini_w
+		var rect := Rect2(x, y0, w, 21)
+		x += w + 2
 		draw_rect(rect, Color(0.09, 0.08, 0.11, 0.86) if not selected else Color(0.28, 0.14, 0.11, 0.92))
 		draw_rect(rect, Color("#ffc050") if selected else Color("#55525c"), false, 1.0)
-		Art.draw_tiny(self, str(i + 1), rect.position + Vector2(3, 3), Color("#ffc050") if selected else Color("#a0a0a8"))
+		Art.draw_tiny(self, str(GameData.WEAPON_ORDER.find(id) + 1), rect.position + Vector2(3, 3), Color("#ffc050") if selected else Color("#a0a0a8"))
 		var gun: Dictionary = Art.guns[id]
 		var tex: Texture2D = gun["tex"]
-		draw_texture(tex, rect.position + Vector2(10, 2))
+		draw_texture(tex, rect.position + Vector2(8, 1))
 		var mag: int = st["mag"]
 		var reserve: int = st["reserve"]
-		var ammo_txt := "%d/%s" % [mag, "--" if reserve < 0 else str(reserve)]
+		var ammo_txt := ""
+		if selected:
+			ammo_txt = "%d/%s" % [mag, "--" if reserve < 0 else str(reserve)]
+		else:
+			ammo_txt = str(mag + maxi(reserve, 0))
 		var ammo_col := Color("#f0ece0")
-		if mag == 0:
+		if mag == 0 and (selected or reserve <= 0):
 			ammo_col = Color("#ff6050")
 		Art.draw_tiny(self, ammo_txt, rect.position + Vector2(3, 14), ammo_col)
-		Art.draw_tiny(self, "%d" % int(st["level"]), rect.position + Vector2(slot_w - 6, 3), Color("#70d080"))
+		if selected:
+			Art.draw_tiny(self, "%d" % int(st["level"]), rect.position + Vector2(slot_w - 6, 3), Color("#70d080"))
 		if selected and p.reload_t > 0.0:
 			var ratio: float = 1.0 - p.reload_t / p.reload_total
 			draw_rect(Rect2(rect.position.x + 1, rect.end.y - 2, (slot_w - 2) * ratio, 1), Color("#f0d050"))
+
+
+## 道具栏：有存货的道具排成一行，选中的高亮并显示名字。
+func _draw_items() -> void:
+	var p: Variant = game.player
+	var shown: Array[String] = []
+	for id: String in GameData.ITEM_ORDER:
+		if int(p.items[id]) > 0 or id == p.selected_item:
+			shown.append(id)
+	var cell_w := 20
+	var total := shown.size() * (cell_w + 1)
+	var x := (W - total) / 2
+	var y := H - 38
+	Art.draw_text(self, "Q %s" % GameData.ITEMS[p.selected_item]["name"], Vector2(x - 3, y - 1), 12, Color("#ffc050"), 2)
+	for id: String in shown:
+		var selected: bool = id == p.selected_item
+		var count: int = p.items[id]
+		var spent: bool = count <= 0 or (id == "nuke" and game.nuke_wave == game.wave)
+		var rect := Rect2(x, y, cell_w, 12)
+		x += cell_w + 1
+		draw_rect(rect, Color(0.28, 0.14, 0.11, 0.92) if selected else Color(0.09, 0.08, 0.11, 0.8))
+		draw_rect(rect, Color("#ffc050") if selected else Color("#55525c"), false, 1.0)
+		draw_texture(Art.item_tex[id], rect.position + Vector2(0, 1), Color(1, 1, 1, 0.35) if spent else Color.WHITE)
+		Art.draw_tiny(self, str(count), rect.position + Vector2(12, 4), Color("#ff6050") if count <= 0 else Color("#f0ece0"))
 
 
 func _draw_minimap() -> void:

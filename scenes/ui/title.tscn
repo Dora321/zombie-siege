@@ -91,15 +91,16 @@ size_flags_vertical = 3
 theme_override_font_sizes/font_size = 12
 text = "WASD 移动    鼠标瞄准    左键射击    R 换弹
 Shift 或空格 冲刺（无敌、有冷却）
-1 / 2 / 3 或滚轮 切换 手枪 / 霰弹枪 / 冲锋枪
+1~9 或滚轮 换枪（4~9 要在商店解锁）
+Q 或中键 用道具    E 切道具
+0 医疗包    - 手雷    = 核弹
 Esc 或 P 暂停    F11 或 F 全屏
 
 目标：守住中央基地，撑过 15 波即胜利
 失败：基地被摧毁，或玩家生命归零
-波次之间打开商店，用金币修墙、升级武器、
-买弹药、放炮塔。玩家可穿过路障，僵尸不行
-红色炸药桶一枪就炸，引怪过去一网打尽！
-自爆僵尸要远距离打死，别让它碰到围墙"
+波次之间打开商店，解锁武器、买道具、修墙
+放炮塔。玩家可穿过路障，僵尸不行
+红色炸药桶一枪就炸，引怪过去一网打尽！"
 
 [node name="HelpClose" type="Button" parent="HelpPanel/VBox"]
 unique_name_in_owner = true

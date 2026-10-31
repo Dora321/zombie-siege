@@ -14,6 +14,7 @@ class Bullet:
 	var pierce: int
 	var color: Color
 	var from_player: bool
+	var chill := 0.0
 	var hits: Array = []
 
 
@@ -45,7 +46,7 @@ func setup(g: Node, m: Node2D) -> void:
 	map = m
 
 
-func fire(pos: Vector2, vel: Vector2, damage: float, knock: float, life: float, pierce: int, color: Color, from_player: bool) -> void:
+func fire(pos: Vector2, vel: Vector2, damage: float, knock: float, life: float, pierce: int, color: Color, from_player: bool) -> Bullet:
 	var b := Bullet.new()
 	b.pos = pos
 	b.vel = vel
@@ -58,6 +59,7 @@ func fire(pos: Vector2, vel: Vector2, damage: float, knock: float, life: float, 
 	bullets.append(b)
 	if from_player:
 		shots_fired += 1
+	return b
 
 
 func spit(from: Vector2, to: Vector2, damage: float) -> void:
@@ -123,7 +125,14 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 			best = z
 	if best != null:
 		var dir := b.vel.normalized()
-		best.take_damage(b.damage, dir, b.knock)
+		var damage: float = b.damage
+		# 炮塔打被冻僵尸有额外加成，鼓励玩家先控场再让炮塔收割
+		if not b.from_player:
+			damage *= best.vulnerability()
+		best.take_damage(damage, dir, b.knock)
+		if b.chill > 0.0:
+			best.apply_chill(b.chill)
+			game.fx.frost(best.center())
 		if b.from_player:
 			shots_hit += 1
 		game.on_bullet_hit()
@@ -159,6 +168,7 @@ func _spit_land(s: Spit) -> void:
 	var player: Variant = game.player
 	if player != null and player.alive and player.position.distance_to(s.to) < 14.0:
 		player.take_damage(s.damage, s.to)
+	game.ordnance.hurt_decoys(s.to, s.damage, 14.0)
 	var cell: int = map.cell_of(s.to)
 	var target: Variant = map.structure_at(cell)
 	if target != null and map.blocks(cell, map.BLOCK_ZOMBIE):

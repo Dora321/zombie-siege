@@ -1,7 +1,12 @@
 extends RefCounted
 ## 商店商品表：UI 只管显示，买东西的规则都在这里，测试也走同一套逻辑。
 
-const TABS: Array[String] = ["武器", "防御", "补给"]
+const TABS: Array[String] = ["武器", "弹药", "防御", "补给", "道具"]
+const TAB_WEAPON := 0
+const TAB_AMMO := 1
+const TAB_DEFENSE := 2
+const TAB_SUPPLY := 3
+const TAB_ITEM := 4
 const MAX_TURRETS := 8
 const MAX_TURRET_LEVEL := 4
 const MAX_WALL_TIER := 4
@@ -17,89 +22,101 @@ static func items(g: Node) -> Array:
 	# 武器
 	for id: String in GameData.WEAPON_ORDER:
 		var state: Dictionary = p.weapon_state[id]
+		var spec: Dictionary = GameData.WEAPONS[id]
 		var level: int = state["level"]
 		var maxed := level >= GameData.MAX_WEAPON_LEVEL
+		var key := GameData.WEAPON_ORDER.find(id) + 1
 		out.append({
-			"id": "up_" + id, "tab": 0,
-			"name": "升级%s Lv%d" % [GameData.WEAPONS[id]["name"], level],
-			"desc": "已满级" if maxed else _weapon_hint(id),
+			"id": "up_" + id, "tab": TAB_WEAPON,
+			"name": "[%d] 解锁%s" % [key, spec["name"]] if level == 0 else "[%d] %s Lv%d" % [key, spec["name"], level],
+			"desc": String(spec["desc"]) if level == 0 else ("已满级" if maxed else String(spec["hint"])),
 			"cost": 0 if maxed else GameData.upgrade_cost(id, level),
 			"locked": maxed,
 		})
-	out.append({"id": "ammo_shotgun", "tab": 0, "name": "霰弹 +12", "desc": "备弹 %d" % p.weapon_state["shotgun"]["reserve"], "cost": 35, "locked": false})
-	out.append({"id": "ammo_smg", "tab": 0, "name": "冲锋枪弹 +64", "desc": "备弹 %d" % p.weapon_state["smg"]["reserve"], "cost": 35, "locked": false})
+	# 弹药：只列已解锁且需要备弹的枪
+	for id: String in p.owned_weapons():
+		var spec: Dictionary = GameData.WEAPONS[id]
+		if not spec.has("ammo_pack"):
+			continue
+		out.append({
+			"id": "ammo_" + id, "tab": TAB_AMMO,
+			"name": "%s +%d" % [spec["name"], spec["ammo_pack"]],
+			"desc": "备弹 %d" % p.weapon_state[id]["reserve"],
+			"cost": spec["ammo_cost"], "locked": false,
+		})
 	# 防御
 	var repair_cost := _repair_full_cost(g)
 	out.append({
-		"id": "repair", "tab": 1, "name": "修复围墙路障",
+		"id": "repair", "tab": TAB_DEFENSE, "name": "修复围墙路障",
 		"desc": "无需修理" if repair_cost == 0 else "钱不够时按比例修",
 		"cost": repair_cost, "locked": repair_cost == 0, "partial": true,
 	})
 	var tier: int = g.map.wall_tier
 	out.append({
-		"id": "reinforce", "tab": 1, "name": "加固围墙 Lv%d" % (tier + 1),
+		"id": "reinforce", "tab": TAB_DEFENSE, "name": "加固围墙 Lv%d" % (tier + 1),
 		"desc": "已满级" if tier >= MAX_WALL_TIER else "围墙耐久 +30%",
 		"cost": 0 if tier >= MAX_WALL_TIER else 90 * (tier + 1), "locked": tier >= MAX_WALL_TIER,
 	})
 	var base_missing: float = g.base.max_hp - g.base.hp
 	out.append({
-		"id": "base_repair", "tab": 1, "name": "抢修基地 +150",
+		"id": "base_repair", "tab": TAB_DEFENSE, "name": "抢修基地 +150",
 		"desc": "基地 %d/%d" % [roundi(g.base.hp), roundi(g.base.max_hp)],
 		"cost": 70, "locked": base_missing < 1.0,
 	})
 	var maxed_turrets: bool = g.turrets.size() >= MAX_TURRETS
 	out.append({
-		"id": "turret", "tab": 1, "name": "放置炮塔 %d/%d" % [g.turrets.size(), MAX_TURRETS],
+		"id": "turret", "tab": TAB_DEFENSE, "name": "放置炮塔 %d/%d" % [g.turrets.size(), MAX_TURRETS],
 		"desc": "已达上限" if maxed_turrets else "点地面放置",
 		"cost": 0 if maxed_turrets else turret_cost(g), "locked": maxed_turrets,
 	})
 	var tlvl: int = g.turret_level
 	out.append({
-		"id": "turret_up", "tab": 1, "name": "升级炮塔 Lv%d" % tlvl,
+		"id": "turret_up", "tab": TAB_DEFENSE, "name": "升级炮塔 Lv%d" % tlvl,
 		"desc": "已满级" if tlvl >= MAX_TURRET_LEVEL else "伤害射速射程提升",
 		"cost": 0 if tlvl >= MAX_TURRET_LEVEL else 130 * tlvl, "locked": tlvl >= MAX_TURRET_LEVEL,
 	})
 	# 补给
 	out.append({
-		"id": "heal", "tab": 2, "name": "急救包 +50",
+		"id": "heal", "tab": TAB_SUPPLY, "name": "急救包 +50",
 		"desc": "生命 %d/%d" % [roundi(p.hp), roundi(p.max_hp)],
 		"cost": 40, "locked": p.hp >= p.max_hp,
 	})
 	var hp_ups: int = g.purchases.get("max_hp", 0)
 	out.append({
-		"id": "max_hp", "tab": 2, "name": "防弹衣 Lv%d" % hp_ups,
+		"id": "max_hp", "tab": TAB_SUPPLY, "name": "防弹衣 Lv%d" % hp_ups,
 		"desc": "已满级" if hp_ups >= 4 else "生命上限 +25",
 		"cost": 0 if hp_ups >= 4 else 80 * (hp_ups + 1), "locked": hp_ups >= 4,
 	})
 	var boots: int = g.purchases.get("boots", 0)
 	out.append({
-		"id": "boots", "tab": 2, "name": "跑鞋 Lv%d" % boots,
+		"id": "boots", "tab": TAB_SUPPLY, "name": "跑鞋 Lv%d" % boots,
 		"desc": "已满级" if boots >= 3 else "移速 +8%",
 		"cost": 0 if boots >= 3 else 70 * (boots + 1), "locked": boots >= 3,
 	})
 	var dash: int = g.purchases.get("dash", 0)
 	out.append({
-		"id": "dash", "tab": 2, "name": "冲刺训练 Lv%d" % dash,
+		"id": "dash", "tab": TAB_SUPPLY, "name": "冲刺训练 Lv%d" % dash,
 		"desc": "已满级" if dash >= 3 else "冲刺冷却 -20%",
 		"cost": 0 if dash >= 3 else 70 * (dash + 1), "locked": dash >= 3,
 	})
 	var magnet: int = g.purchases.get("magnet", 0)
 	out.append({
-		"id": "magnet", "tab": 2, "name": "磁铁 Lv%d" % magnet,
+		"id": "magnet", "tab": TAB_SUPPLY, "name": "磁铁 Lv%d" % magnet,
 		"desc": "已满级" if magnet >= 3 else "拾取范围 +40%",
 		"cost": 0 if magnet >= 3 else 50 * (magnet + 1), "locked": magnet >= 3,
 	})
+	# 道具：带进战斗，用快捷键使用
+	for id: String in GameData.ITEM_ORDER:
+		var spec: Dictionary = GameData.ITEMS[id]
+		var count: int = p.items[id]
+		var pack: int = spec["pack"]
+		out.append({
+			"id": "item_" + id, "tab": TAB_ITEM,
+			"name": "%s%s %d/%d" % [spec["name"], "x%d" % pack if pack > 1 else "", count, spec["max"]],
+			"desc": "已带满" if count >= int(spec["max"]) else String(spec["desc"]),
+			"cost": spec["cost"], "locked": count >= int(spec["max"]),
+		})
 	return out
-
-
-static func _weapon_hint(id: String) -> String:
-	match id:
-		"pistol":
-			return "伤害射速提升，隔级穿透"
-		"shotgun":
-			return "伤害提升，弹丸 +1"
-		_:
-			return "伤害提升，更稳更快"
 
 
 static func _repair_full_cost(g: Node) -> int:
@@ -127,12 +144,14 @@ static func buy(g: Node, id: String) -> bool:
 	var p: Variant = g.player
 	if id.begins_with("up_"):
 		p.upgrade_weapon(id.trim_prefix("up_"))
+	elif id.begins_with("ammo_"):
+		var weapon := id.trim_prefix("ammo_")
+		p.weapon_state[weapon]["reserve"] += int(GameData.WEAPONS[weapon]["ammo_pack"])
+	elif id.begins_with("item_"):
+		var item_id := id.trim_prefix("item_")
+		p.add_item(item_id, int(GameData.ITEMS[item_id]["pack"]))
 	else:
 		match id:
-			"ammo_shotgun":
-				p.weapon_state["shotgun"]["reserve"] += 12
-			"ammo_smg":
-				p.weapon_state["smg"]["reserve"] += 64
 			"repair":
 				var ratio := minf(1.0, float(g.coins) / maxf(float(cost), 1.0))
 				cost = mini(cost, g.coins)

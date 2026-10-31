@@ -11,6 +11,8 @@ var max_hp := 1.0
 var dead := false
 var hit_r := 6.0
 var center_h := 7.0
+## 核弹清场时置位，死后不再二次爆炸。
+var no_blast := false
 
 var _speed := 30.0
 var _damage := 5.0
@@ -45,6 +47,17 @@ var _charge_dir := Vector2.ZERO
 # 喷吐僵尸的蓄力
 var _windup := -1.0
 var _spit_target := Vector2.ZERO
+# 状态异常：减速、冰冻、眩晕、燃烧
+var _chill := 0.0
+var _chill_t := 0.0
+var _frozen_t := 0.0
+var _stun_t := 0.0
+var _burn_t := 0.0
+var _dot_shown := 0.0
+var _ember_t := 0.0
+var _status_key := 0
+# 诱饵
+var _lure: Variant = null
 
 @onready var body: Sprite2D = $Body
 @onready var shadow: Sprite2D = $Shadow
@@ -94,6 +107,15 @@ func _physics_process(dt: float) -> void:
 	_stagger_t -= dt
 	_think_t -= dt
 	_lunge = _lunge.lerp(Vector2.ZERO, clampf(16.0 * dt, 0.0, 1.0))
+	_tick_status(dt)
+	if dead:
+		return
+	if _frozen_t > 0.0 or _stun_t > 0.0:
+		# 冻住和眩晕时站着不动，只吃击退
+		position = map.move_box(position, _knock * dt, BOX_R, map.BLOCK_ZOMBIE)
+		_knock = _knock.lerp(Vector2.ZERO, clampf(9.0 * dt, 0.0, 1.0))
+		_animate(dt, Vector2.ZERO, 0.0)
+		return
 	if _think_t <= 0.0:
 		_think_t = randf_range(0.16, 0.3)
 		_think()
@@ -104,6 +126,8 @@ func _physics_process(dt: float) -> void:
 	var spd := _speed
 	if _stagger_t > 0.0:
 		spd *= 0.45
+	if _chill_t > 0.0:
+		spd *= GameData.CHILL_SLOW_BOSS if kind == "boss" else GameData.CHILL_SLOW
 	if _charge_t > 0.0:
 		spd = _speed * 4.2
 	var motion: Vector2 = move_dir * spd + _sep * 34.0 + _knock
@@ -141,7 +165,12 @@ func _check_stuck(dt: float, move_dir: Vector2, moved: float, spd: float) -> voi
 func _think() -> void:
 	var player: Variant = game.player
 	_chasing = false
+	_lure = null
 	if _recenter_t > 0.0:
+		return
+	var decoy: Variant = game.ordnance.nearest_decoy(position, float(GameData.ITEMS["decoy"]["radius"]))
+	if decoy != null and map.line_clear(position, decoy.pos, map.BLOCK_ZOMBIE):
+		_lure = decoy
 		return
 	if player != null and player.alive:
 		var d: float = position.distance_to(player.position)
@@ -207,7 +236,10 @@ func _decide(dt: float) -> Vector2:
 				_attack_player(player)
 			return position.direction_to(player.position) * 0.2
 
-	# 喷吐僵尸：优先吐玩家，其次基地，再其次路上的建筑
+	if _lure != null and not _lure.alive:
+		_lure = null
+
+	# 喷吐僵尸：优先吐诱饵，其次玩家，再其次基地和路上的建筑
 	if _spit_range > 0.0 and _attack_t <= 0.0:
 		var target: Variant = _pick_spit_target(player_ok)
 		if target != null:
@@ -215,6 +247,20 @@ func _decide(dt: float) -> Vector2:
 			_spit_target = target
 			_attack_t = _attack_cd
 			return Vector2.ZERO
+
+	if _lure != null:
+		var lure_d: float = position.distance_to(_lure.pos)
+		if lure_d < hit_r + 9.0:
+			if kind == "exploder":
+				_light_fuse()
+			elif _attack_t <= 0.0:
+				_attack_t = _attack_cd
+				_lunge = position.direction_to(_lure.pos) * 5.0
+				_lure.hp -= _damage
+			return Vector2.ZERO
+		if _spit_range > 0.0 and lure_d < _spit_range * 0.7:
+			return Vector2.ZERO
+		return position.direction_to(_lure.pos)
 
 	if _chasing and player_ok:
 		if _spit_range > 0.0 and position.distance_to(player.position) < _spit_range * 0.7:
@@ -268,6 +314,8 @@ func _end_charge() -> void:
 
 
 func _pick_spit_target(player_ok: bool) -> Variant:
+	if _lure != null and position.distance_to(_lure.pos) < _spit_range:
+		return _lure.pos
 	if player_ok:
 		var p: Vector2 = game.player.position
 		if position.distance_to(p) < _spit_range:
@@ -315,10 +363,100 @@ func _explode_now() -> void:
 	queue_free()
 
 
+## 冻住和减速时更吃伤害。
+func vulnerability() -> float:
+	if _frozen_t > 0.0:
+		return GameData.FREEZE_VULN
+	if _chill_t > 0.0:
+		return GameData.CHILL_VULN
+	return 1.0
+
+
+func apply_chill(amount: float) -> void:
+	if dead:
+		return
+	_burn_t = 0.0
+	_chill_t = GameData.CHILL_TIME
+	_chill += amount
+	if _chill >= 1.0 and kind != "boss" and _frozen_t <= 0.0:
+		_chill = 0.0
+		_frozen_t = GameData.FREEZE_TIME * (0.5 if kind == "tank" else 1.0)
+		_fuse = -1.0
+		_windup = -1.0
+		game.fx.frost(center())
+		Sfx.play("cryo", 0.0, 0.2)
+
+
+func stun(seconds: float) -> void:
+	if dead:
+		return
+	_stun_t = maxf(_stun_t, seconds)
+	_windup = -1.0
+	if _charge_t > 0.0:
+		_end_charge()
+
+
+func ignite(seconds: float) -> void:
+	if dead:
+		return
+	_burn_t = maxf(_burn_t, seconds)
+	_chill = 0.0
+	_chill_t = 0.0
+	_frozen_t = 0.0
+
+
+## 火焰这类高频小伤害：不飘血不出声，攒够才飘一次字。
+func take_tick(amount: float) -> void:
+	if dead:
+		return
+	var dealt := amount * vulnerability()
+	hp -= dealt
+	_dot_shown += dealt
+	if _dot_shown >= 10.0:
+		game.fx.number(center() + Vector2(randf_range(-3, 3), -6), roundi(_dot_shown), Color("#ff9040"))
+		_dot_shown = 0.0
+		_flash_t = 0.05
+	if hp <= 0.0:
+		_die(Vector2.UP)
+
+
+func _tick_status(dt: float) -> void:
+	_chill_t -= dt
+	_frozen_t -= dt
+	_stun_t -= dt
+	if _chill_t <= 0.0:
+		_chill = 0.0
+	if _burn_t > 0.0:
+		_burn_t -= dt
+		_ember_t -= dt
+		if _ember_t <= 0.0:
+			_ember_t = 0.14
+			game.fx.ember(center())
+		take_tick(GameData.BURN_DPS * dt)
+		if dead:
+			return
+	var key := 0
+	if _frozen_t > 0.0:
+		key = 1
+	elif _stun_t > 0.0:
+		key = 2
+	elif _burn_t > 0.0:
+		key = 3
+	elif _chill_t > 0.0:
+		key = 4
+	if key != _status_key:
+		_status_key = key
+		body.modulate = [Color.WHITE, Color(0.55, 0.85, 1.7), Color(1.5, 1.45, 0.75), Color(1.6, 0.8, 0.5), Color(0.75, 0.95, 1.35)][key]
+		queue_redraw()
+	elif key == 2:
+		queue_redraw()
+
+
 ## 子弹、爆炸都走这里。
 func take_damage(amount: float, dir: Vector2, knock: float, show_number := true) -> void:
 	if dead:
 		return
+	amount *= vulnerability()
 	hp -= amount
 	_flash_t = 0.07
 	_stagger_t = 0.1
@@ -345,7 +483,7 @@ func _die(dir: Vector2) -> void:
 	if size.x >= 24:
 		game.decals.stamp(splats[randi() % splats.size()], position + Vector2(randf_range(-10, 10), randf_range(-8, 6)))
 	Sfx.play("zombie_die", -4.0 if kind != "boss" else 2.0, 0.12)
-	if kind == "exploder":
+	if kind == "exploder" and not no_blast:
 		# 打爆自爆僵尸有奖励：范围伤害会波及同类
 		game.explode.call_deferred(position + Vector2(0, -6), _damage * 0.7, 42.0, false)
 	if kind == "tank" or kind == "boss":
@@ -355,6 +493,23 @@ func _die(dir: Vector2) -> void:
 		game.hitstop(0.022)
 	game.credit_kill(self, true)
 	queue_free()
+
+
+## 冰块和眩晕星星画在身体之外，不用跟动画帧打交道。
+func _draw() -> void:
+	match _status_key:
+		1:
+			var half := hit_r + 2.0
+			var top := -center_h * 2.0 - 1.0
+			draw_rect(Rect2(-half, top, half * 2.0, center_h * 2.0 + 2.0), Color(0.6, 0.9, 1.0, 0.35))
+			for k: Vector2 in [Vector2(-half, top), Vector2(half - 2.0, top + 3.0), Vector2(-half + 1.0, -3.0), Vector2(half - 3.0, -2.0)]:
+				draw_rect(Rect2(k, Vector2(2, 2)), Color("#e0f8ff"))
+		2:
+			var a := Time.get_ticks_msec() * 0.008
+			var y := -center_h * 2.0 - 4.0
+			for k in 3:
+				var at := Vector2(cos(a + k * 2.1) * hit_r, y + sin(a + k * 2.1) * 2.0).round()
+				draw_rect(Rect2(at, Vector2(2, 2)), Color("#fff060"))
 
 
 func _animate(dt: float, move_dir: Vector2, moved: float) -> void:

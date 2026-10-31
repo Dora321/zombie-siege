@@ -59,16 +59,36 @@ const TINY := {
 const PISTOL := [".hhhhhhhh", ".gggggggg", ".kwg.....", ".kw......"]
 const SHOTGUN := ["........hhhhhhhh", "wwwwgggggggggggg", "wwwkkgggg.kkkk..", "ww.............."]
 const SMG := ["...hhhhhhhh..", "kkkggggggggkk", "k..gggkg.....", "....kk.k.....", "....kk......."]
-const GUN_PAL := {"h": "#b8bcc8", "g": "#6c7080", "k": "#34343e", "w": "#7c5230"}
+const SNIPER := [".....bbbbb..........", ".....kk.kk..........", "wwwwgggggggggggggghh", "wwwkkgg.kk.........k", "ww.................."]
+const FLAMER := ["..oooooo........", ".oyoooooo.......", ".ooooooog....rrr", "kkkkgggggghhhhyr", "kk..gk.gk....rrr"]
+const GRENADE_GUN := [".hhhhhhhhhh....", "kggggggggggggkk", "kkggkkkgggggkkk", "kk.kkk.ggggg...", "kk............."]
+const ARC_GUN := ["...cc.cc.cc...", "kkggggggggghhl", "kk.gcgcgcg..hl", "k..gg........."]
+const CRYO_GUN := ["..tttt........", ".tiiiitt......", "kkggggggghhiit", "kk.gk.....hiit"]
+const BOOMERANG := ["rr......", "wrr.....", "wwww....", ".wwww...", "..wwwwww", "...wwwrr", "......rr"]
+const GUN_PAL := {
+	"h": "#b8bcc8", "g": "#6c7080", "k": "#34343e", "w": "#7c5230", "b": "#50c0e0", "o": "#d06828", "y": "#f0d050",
+	"r": "#c83c30", "c": "#50a8f0", "l": "#d8f0ff", "t": "#70c8d8", "i": "#d8f8ff",
+}
 
 const MEDKIT := [".wwwwwww.", "wwwwrwwww", "wwwwrwwww", "wrrrrrrrw", "wwwwrwwww", "wwwwrwwww", ".ggggggg."]
 const AMMOBOX := ["..yyyyy..", ".ooooooo.", "ooyooyooo", "ooyooyooo", "ddddddddd", "ddddddddd"]
 const HEART := [".rr.rr.", "rlrrrrr", "rrrrrrr", ".rrrrr.", "..rrr..", "...r..."]
 const SHIELD := ["bbbbbbb", "blbbbbb", "blbbbbb", "bbbbbbb", ".bbbbb.", "..bbb.."]
 const SKULL := [".wwwww.", "wwwwwww", "wkkwkkw", "wwwwwww", ".wkwkw."]
+const ARMOR_PLATE := [".sssssss.", "sllsssdss", "slsssssds", "sssssssss", ".sssssds.", "..sssds..", "...sds..."]
+const FRAG := ["..hh.y...", "..hhyy...", ".ooooo...", "ooddoood.", "ooooddod.", "oddooood.", ".ooooo..."]
+const STICKY := ["..n..n...", ".nnnnnn..", "nnGGGGnn.", ".nGrrGn..", "nnGGGGnn.", ".nnnnnn..", "..n..n..."]
+const FLASH_ITEM := ["...w.....", ".y.w.y...", "..ggg....", "wwgwgww..", "..gwg....", ".yggg.y..", "...w....."]
+const DECOY_ITEM := ["...sss...", "...sss...", "..yyyyy..", ".wwyyyww.", "...yyy...", "...d.d...", "...d.d..."]
+const INF_AMMO := ["..yyyyy..", ".yoooooy.", "yooyoyooy", "yoyoyoyoy", "yooyoyooy", ".yoooooy.", "..yyyyy.."]
+const SPEED_POTION := ["...kk....", "...ss....", "..ssss...", ".sbbbbs..", "sbblbbbs.", "sbbbbbbs.", ".ssssss.."]
+const DAMAGE_POTION := ["...kk....", "...ss....", "..ssss...", ".srrrrs..", "srrlrrrs.", "srrrrrrs.", ".ssssss.."]
+const NUKE := ["kkkkkkkkk", "kyyyyyyyk", "kykkkkyyk", "kyykkyyyk", "kyyykyyyk", "kyyyyyyyk", "kkkkkkkkk"]
+const DECOY_BODY := ["...sss...", "...sss...", "m..www..m", "mmywwwymm", "...www...", "...www...", "...www...", "...d.d...", "...d.d...", "..dd.dd.."]
 const MISC_PAL := {
 	"w": "#f0ece0", "r": "#d83838", "g": "#a0a0a8", "y": "#f0d050", "o": "#6c7a3c",
-	"d": "#48522c", "l": "#ffa090", "b": "#5a90d0", "k": "#201c28",
+	"d": "#48522c", "l": "#ffa090", "b": "#5a90d0", "k": "#201c28", "s": "#a8b4c8", "h": "#8c8c94",
+	"n": "#70d040", "G": "#3c7a20", "m": "#e0a050",
 }
 
 var font: Font
@@ -90,6 +110,9 @@ var ammo_tex: Texture2D
 var heart_tex: Texture2D
 var shield_tex: Texture2D
 var skull_tex: Texture2D
+var item_tex := {}
+var boomerang_tex: Texture2D
+var decoy_tex: Texture2D
 var shadow_small: Texture2D
 var shadow_medium: Texture2D
 var shadow_big: Texture2D
@@ -157,6 +180,23 @@ func debug_sheet() -> Image:
 					x = 2
 					y += size.y + 1
 		y += size.y + 2
+	# 枪和道具图标
+	var x := 2
+	for id: String in GameData.WEAPON_ORDER:
+		var im: Image = guns[id]["tex"].get_image()
+		if x + im.get_width() > 318:
+			x = 2
+			y += 12
+		sheet.blit_rect_mask(im, im, Rect2i(Vector2i.ZERO, im.get_size()), Vector2i(x, y))
+		x += im.get_width() + 3
+	x = 2
+	y += 12
+	for id: String in GameData.ITEM_ORDER:
+		var im: Image = item_tex[id].get_image()
+		sheet.blit_rect_mask(im, im, Rect2i(Vector2i.ZERO, im.get_size()), Vector2i(x, y))
+		x += im.get_width() + 3
+	var dim: Image = decoy_tex.get_image()
+	sheet.blit_rect_mask(dim, dim, Rect2i(Vector2i.ZERO, dim.get_size()), Vector2i(x, y))
 	return sheet
 
 
@@ -513,10 +553,14 @@ func _cut_gibs(src: Image, block: int) -> Array:
 # ---------------------------------------------------------------------------
 
 func _build_guns() -> void:
-	var specs := {"pistol": PISTOL, "shotgun": SHOTGUN, "smg": SMG}
+	var specs := {
+		"pistol": PISTOL, "shotgun": SHOTGUN, "smg": SMG, "sniper": SNIPER, "flamer": FLAMER,
+		"grenade": GRENADE_GUN, "arc": ARC_GUN, "cryo": CRYO_GUN, "boomerang": BOOMERANG,
+	}
 	for id in specs.keys():
 		var img := _ascii(specs[id], GUN_PAL)
 		guns[id] = {"tex": _tex(img), "w": img.get_width(), "h": img.get_height()}
+	boomerang_tex = guns["boomerang"]["tex"]
 	var brass := _new(2, 1)
 	brass.fill(Color("#e8c050"))
 	var red := _new(3, 2)
@@ -537,6 +581,13 @@ func _build_items(_rng: RandomNumberGenerator) -> void:
 	heart_tex = _tex(_ascii(HEART, MISC_PAL))
 	shield_tex = _tex(_ascii(SHIELD, MISC_PAL))
 	skull_tex = _tex(_ascii(SKULL, MISC_PAL))
+	var icons := {
+		"medkit": MEDKIT, "armor": ARMOR_PLATE, "frag": FRAG, "sticky": STICKY, "flash": FLASH_ITEM, "decoy": DECOY_ITEM,
+		"ammo_crate": AMMOBOX, "inf_ammo": INF_AMMO, "speed": SPEED_POTION, "damage": DAMAGE_POTION, "nuke": NUKE,
+	}
+	for id: String in icons.keys():
+		item_tex[id] = _tex(_ascii(icons[id], MISC_PAL))
+	decoy_tex = _tex(_ascii(DECOY_BODY, MISC_PAL))
 	shadow_small = _tex(_shadow(11, 4))
 	shadow_medium = _tex(_shadow(19, 6))
 	shadow_big = _tex(_shadow(29, 9))

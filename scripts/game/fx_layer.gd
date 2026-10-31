@@ -3,6 +3,14 @@ extends Node2D
 ## 集中用数组模拟并绘制；落地的粒子会被印到贴花层，永久留在地上。
 
 const MAX_PARTICLES := 520
+## 枪口火光配色：内芯、外焰、地面辉光、火星。
+const FLASH_TINTS := {
+	"": ["#fff8d0", "#ffb040", Color(1.0, 0.8, 0.4, 0.14), "#ffd870"],
+	"sniper": ["#fff4f0", "#ff6a50", Color(1.0, 0.4, 0.3, 0.2), "#ffb0a0"],
+	"smoke": ["#f0e8c8", "#b8a880", Color(0.9, 0.85, 0.6, 0.1), "#a0a098"],
+	"arc": ["#f0faff", "#60a8ff", Color(0.4, 0.7, 1.0, 0.22), "#a0d8ff"],
+	"cryo": ["#f0ffff", "#90e4ff", Color(0.6, 0.9, 1.0, 0.18), "#d0f8ff"],
+}
 
 class P:
 	var x: float
@@ -27,6 +35,9 @@ class Flash:
 	var dir: Vector2
 	var t: float
 	var big: bool
+	var core: Color
+	var edge: Color
+	var glow: Color
 
 
 class Blast:
@@ -34,6 +45,14 @@ class Blast:
 	var r: float
 	var t: float
 	var dur: float
+
+
+class Ring:
+	var pos: Vector2
+	var r: float
+	var t: float
+	var dur: float
+	var color: Color
 
 
 class Ghost:
@@ -58,6 +77,7 @@ var decals: Node2D
 var particles: Array[P] = []
 var flashes: Array[Flash] = []
 var blasts: Array[Blast] = []
+var rings: Array[Ring] = []
 var ghosts: Array[Ghost] = []
 var floaters: Array[Floater] = []
 
@@ -153,12 +173,16 @@ func casing(pos: Vector2, aim: Vector2, shell: bool) -> void:
 	p.tink = true
 
 
-func muzzle_flash(pos: Vector2, dir: Vector2, big: bool) -> void:
+func muzzle_flash(pos: Vector2, dir: Vector2, big: bool, tint := "") -> void:
 	var f := Flash.new()
 	f.pos = pos
 	f.dir = dir
 	f.t = 0.05 if not big else 0.075
 	f.big = big
+	var pal: Array = FLASH_TINTS[tint]
+	f.core = Color(pal[0])
+	f.edge = Color(pal[1])
+	f.glow = pal[2]
 	flashes.append(f)
 	for i in (5 if big else 2):
 		var p := _spawn()
@@ -170,9 +194,86 @@ func muzzle_flash(pos: Vector2, dir: Vector2, big: bool) -> void:
 		p.vx = cos(a) * s
 		p.vy = sin(a) * s
 		p.vz = randf_range(-5, 15)
-		p.color = Color("#ffd870")
+		p.color = Color(pal[3])
 		p.life = randf_range(0.05, 0.13)
 		p.gravity = 0.0
+
+
+## 火焰喷射器的一股火：粒子贴着锥形飞，越远越暗。
+func flame(pos: Vector2, dir: Vector2, length: float, cone: float) -> void:
+	for i in 4:
+		var p := _spawn()
+		p.x = pos.x
+		p.y = pos.y + 7.0
+		p.z = 7.0
+		var a := dir.angle() + randf_range(-cone, cone)
+		var life := randf_range(0.14, 0.28)
+		var s := length / life * randf_range(0.55, 1.0)
+		p.vx = cos(a) * s
+		p.vy = sin(a) * s
+		p.vz = randf_range(0, 20)
+		p.gravity = 0.0
+		p.size = 3 if i == 0 else 2
+		p.color = [Color("#fff0a0"), Color("#ffb030"), Color("#ff7020"), Color("#e04818")][i]
+		p.life = life
+
+
+## 燃烧僵尸身上冒的火星。
+func ember(pos: Vector2) -> void:
+	var p := _spawn()
+	p.x = pos.x + randf_range(-3, 3)
+	p.y = pos.y + 7.0
+	p.z = 7.0 + randf_range(-3, 3)
+	p.vx = randf_range(-6, 6)
+	p.vy = 0.0
+	p.vz = randf_range(20, 40)
+	p.gravity = 0.0
+	p.size = 2 if randf() < 0.3 else 1
+	p.color = Color("#ffb030") if randf() < 0.6 else Color("#ff6020")
+	p.life = randf_range(0.2, 0.4)
+
+
+## 电弧命中点的蓝色火花。
+func zap(pos: Vector2) -> void:
+	for i in 5:
+		var p := _spawn()
+		p.x = pos.x
+		p.y = pos.y + 7.0
+		p.z = 7.0
+		var a := randf() * TAU
+		p.vx = cos(a) * randf_range(30, 90)
+		p.vy = sin(a) * randf_range(30, 90)
+		p.vz = randf_range(0, 30)
+		p.gravity = 0.0
+		p.color = Color("#f0faff") if i % 2 == 0 else Color("#60a8ff")
+		p.life = randf_range(0.08, 0.18)
+
+
+## 冰碴。
+func frost(pos: Vector2) -> void:
+	for i in 3:
+		var p := _spawn()
+		p.x = pos.x
+		p.y = pos.y + 7.0
+		p.z = 7.0
+		var a := randf() * TAU
+		p.vx = cos(a) * randf_range(15, 45)
+		p.vy = sin(a) * randf_range(10, 30)
+		p.vz = randf_range(20, 50)
+		p.gravity = 160.0
+		p.color = Color("#e0f8ff") if i % 2 == 0 else Color("#90e4ff")
+		p.life = randf_range(0.2, 0.35)
+
+
+## 向外扩散的一圈光环。
+func ring(pos: Vector2, radius: float, dur: float, color: Color) -> void:
+	var r := Ring.new()
+	r.pos = pos
+	r.r = radius
+	r.t = dur
+	r.dur = dur
+	r.color = color
+	rings.append(r)
 
 
 func spark(pos: Vector2) -> void:
@@ -365,6 +466,12 @@ func _physics_process(dt: float) -> void:
 		if blasts[i].t <= 0.0:
 			blasts.remove_at(i)
 		i -= 1
+	i = rings.size() - 1
+	while i >= 0:
+		rings[i].t -= dt
+		if rings[i].t <= 0.0:
+			rings.remove_at(i)
+		i -= 1
 	i = ghosts.size() - 1
 	while i >= 0:
 		ghosts[i].t -= dt
@@ -401,6 +508,12 @@ func _draw() -> void:
 			draw_rect(Rect2(at, Vector2(p.size, p.size)), p.color)
 	for b in blasts:
 		_draw_blast(b)
+	for r in rings:
+		var ratio := 1.0 - r.t / r.dur
+		var c := r.color
+		c.a = 1.0 - ratio
+		draw_circle(r.pos.round(), r.r * ratio, Color(c.r, c.g, c.b, c.a * 0.25))
+		draw_arc(r.pos.round(), r.r * ratio, 0.0, TAU, 32, c, 2.0)
 	for f in floaters:
 		var c := f.color
 		c.a = clampf(f.t * 4.0, 0.0, 1.0)
@@ -417,17 +530,17 @@ func _draw_flash(f: Flash) -> void:
 	var side := f.dir.orthogonal()
 	var at := f.pos.round()
 	# 地面上一圈昏黄的火光
-	draw_circle(at, 13.0 if f.big else 8.0, Color(1.0, 0.8, 0.4, 0.14))
+	draw_circle(at, 13.0 if f.big else 8.0, f.glow)
 	var steps := int(length)
 	for s in steps:
 		var ratio := float(s) / steps
 		var half := int((1.0 - ratio) * (3.0 if f.big else 2.0))
 		var p := at + f.dir * s
-		draw_rect(Rect2((p - side * half).round(), Vector2(1, 1)), Color("#ffb040"))
-		draw_rect(Rect2((p + side * half).round(), Vector2(1, 1)), Color("#ffb040"))
-		draw_rect(Rect2(p.round(), Vector2(1, 1)), Color("#fff8d0"))
-	draw_rect(Rect2((at - side * 3.0).round(), Vector2(1, 1)), Color("#ffe080"))
-	draw_rect(Rect2((at + side * 3.0).round(), Vector2(1, 1)), Color("#ffe080"))
+		draw_rect(Rect2((p - side * half).round(), Vector2(1, 1)), f.edge)
+		draw_rect(Rect2((p + side * half).round(), Vector2(1, 1)), f.edge)
+		draw_rect(Rect2(p.round(), Vector2(1, 1)), f.core)
+	draw_rect(Rect2((at - side * 3.0).round(), Vector2(1, 1)), f.edge.lightened(0.3))
+	draw_rect(Rect2((at + side * 3.0).round(), Vector2(1, 1)), f.edge.lightened(0.3))
 
 
 func _draw_blast(b: Blast) -> void:

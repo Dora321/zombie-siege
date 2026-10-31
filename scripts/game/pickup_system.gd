@@ -1,5 +1,5 @@
 extends Node2D
-## 掉落物：金币、弹药箱、医疗包。弹一下落地，靠近会被吸过来，波次结束全部飞向玩家。
+## 掉落物：金币、弹药箱、医疗包、道具。弹一下落地，靠近会被吸过来，波次结束全部飞向玩家。
 
 class Item:
 	var pos: Vector2
@@ -8,6 +8,7 @@ class Item:
 	var vz: float
 	var kind: String
 	var value: int
+	var id: String
 	var age: float
 	var pulled: bool
 
@@ -15,13 +16,17 @@ class Item:
 var game: Node
 var items: Array[Item] = []
 var magnet_all := false
+## 自测场地里关掉掉落，捡到的东西会干扰数量断言。
+var enabled := true
 
 
 func setup(g: Node) -> void:
 	game = g
 
 
-func drop(pos: Vector2, kind: String, value: int) -> void:
+func drop(pos: Vector2, kind: String, value: int, id := "") -> void:
+	if not enabled:
+		return
 	var it := Item.new()
 	it.pos = pos
 	var a := randf() * TAU
@@ -30,6 +35,7 @@ func drop(pos: Vector2, kind: String, value: int) -> void:
 	it.vz = randf_range(40, 70)
 	it.kind = kind
 	it.value = value
+	it.id = id
 	it.age = randf() * 2.0
 	it.pulled = false
 	items.append(it)
@@ -77,6 +83,14 @@ func _collect(it: Item) -> void:
 			game.player.heal(float(it.value))
 			game.fx.text(it.pos + Vector2(0, -8), "生命 +%d" % it.value, Color("#ff8080"))
 			Sfx.play("buy", -3.0)
+		"item":
+			if game.player.add_item(it.id, it.value):
+				game.fx.text(it.pos + Vector2(0, -8), "捡到%s" % GameData.ITEMS[it.id]["name"], Color("#a0e0ff"))
+				Sfx.play("buy", -3.0)
+			else:
+				game.add_coins(GameData.ITEM_OVERFLOW_COINS)
+				game.fx.coin_text(it.pos + Vector2(0, -6), GameData.ITEM_OVERFLOW_COINS)
+				Sfx.play("coin", -8.0, 0.1)
 
 
 func _draw() -> void:
@@ -91,3 +105,6 @@ func _draw() -> void:
 				draw_texture(Art.ammo_tex, at - Art.ammo_tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))
 			"med":
 				draw_texture(Art.medkit_tex, at - Art.medkit_tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))
+			"item":
+				var tex: Texture2D = Art.item_tex[it.id]
+				draw_texture(tex, at - tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))

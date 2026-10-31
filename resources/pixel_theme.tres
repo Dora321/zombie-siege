@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=9 format=3]
+[gd_resource type="Theme" load_steps=11 format=3]
 
 [ext_resource type="FontFile" path="res://resources/fonts/fusion-pixel-12px-proportional-zh_hans.subset.ttf" id="font"]
 
@@ -71,7 +71,19 @@ border_width_bottom = 2
 border_color = Color(0.5, 0.45, 0.4, 1)
 
 [sub_resource type="StyleBoxFlat" id="scroll"]
+content_margin_left = 3.0
+content_margin_right = 3.0
 bg_color = Color(0.17, 0.16, 0.2, 1)
+
+[sub_resource type="StyleBoxFlat" id="scroll_grabber"]
+content_margin_left = 3.0
+content_margin_right = 3.0
+bg_color = Color(0.72, 0.56, 0.3, 1)
+
+[sub_resource type="StyleBoxFlat" id="scroll_grabber_hot"]
+content_margin_left = 3.0
+content_margin_right = 3.0
+bg_color = Color(1, 0.75, 0.31, 1)
 
 [resource]
 default_font = ExtResource("font")
@@ -89,4 +101,7 @@ Label/colors/font_color = Color(0.92, 0.9, 0.84, 1)
 Label/constants/line_spacing = -2
 Panel/styles/panel = SubResource("panel")
 PanelContainer/styles/panel = SubResource("panel")
+VScrollBar/styles/grabber = SubResource("scroll_grabber")
+VScrollBar/styles/grabber_highlight = SubResource("scroll_grabber_hot")
+VScrollBar/styles/grabber_pressed = SubResource("scroll_grabber_hot")
 VScrollBar/styles/scroll = SubResource("scroll")

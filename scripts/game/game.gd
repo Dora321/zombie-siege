@@ -23,6 +23,7 @@ const CAMERA_LOOK := 0.2
 @onready var pickups: Node2D = $Pickups
 @onready var entities: Node2D = $Entities
 @onready var bullets: Node2D = $Bullets
+@onready var ordnance: Node2D = $Ordnance
 @onready var fx: Node2D = $Fx
 @onready var camera: Camera2D = $Camera
 @onready var tint: CanvasModulate = $Tint
@@ -45,6 +46,8 @@ var turret_level := 1
 ## 基地有装甲：僵尸对基地的伤害打折，否则尸群一贴上来几秒就没了。
 var base_damage_scale := 0.42
 var purchases := {}
+## 上一次用核弹的波次，每波限一次。
+var nuke_wave := 0
 var god_mode := false
 var victory := false
 var end_reason := ""
@@ -88,6 +91,7 @@ func _ready() -> void:
 	map.setup(self, _rng)
 	decals.position = Vector2.ZERO
 	bullets.setup(self, map)
+	ordnance.setup(self, map)
 	fx.setup(self, decals)
 	pickups.setup(self)
 	base = BaseScene.instantiate()
@@ -171,7 +175,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _notification(what: int) -> void:
 	# 切走窗口时自动暂停，避免回来时基地已经没了。网页版只发窗口焦点通知
-	if (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT) and Harness.bot == null and is_node_ready():
+	if (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT) and not Harness.automated() and is_node_ready():
 		if state == State.COMBAT or state == State.COUNTDOWN:
 			pause_ui.open()
 
@@ -258,6 +262,7 @@ func _tick_ambience(dt: float) -> void:
 
 func _wave_cleared() -> void:
 	bullets.clear_hazards()
+	ordnance.clear_field()
 	pickups.magnet_all = true
 	var bonus := GameData.wave_bonus(wave)
 	coins += bonus
@@ -365,10 +370,12 @@ func credit_kill(z: Variant, drops: bool) -> void:
 		var v := mini(total, 10 if total >= 10 else 3)
 		pickups.drop(z.position + Vector2(0, -4), "coin", v)
 		total -= v
-	var roll := randf()
-	if roll < 0.045:
+	var entry := GameData.roll_drop(z.kind)
+	if entry.has("item"):
+		pickups.drop(z.position + Vector2(0, -4), "item", 1, String(entry["item"]))
+	elif entry.get("kind") == "ammo":
 		pickups.drop(z.position + Vector2(0, -4), "ammo", 1)
-	elif roll < 0.065:
+	elif entry.get("kind") == "med":
 		pickups.drop(z.position + Vector2(0, -4), "med", 25)
 
 
@@ -386,8 +393,10 @@ func spend_coins(amount: int) -> void:
 
 
 func grant_ammo_box() -> void:
-	player.weapon_state["shotgun"]["reserve"] = int(player.weapon_state["shotgun"]["reserve"]) + 6
-	player.weapon_state["smg"]["reserve"] = int(player.weapon_state["smg"]["reserve"]) + 32
+	for id: String in player.owned_weapons():
+		var st: Dictionary = player.weapon_state[id]
+		if int(st["reserve"]) >= 0:
+			st["reserve"] = int(st["reserve"]) + int(GameData.WEAPONS[id].get("ammo_drop", 0))
 	fx.text(player.position + Vector2(0, -22), "弹药补给", Color("#c8e070"))
 
 
@@ -458,8 +467,10 @@ func _tick_game_over() -> void:
 # 爆炸（自爆僵尸、炸药桶、炮塔残骸都走这里）
 # ---------------------------------------------------------------------------
 
-func explode(pos: Vector2, damage: float, radius: float, friendly: bool) -> void:
+## spare_base：玩家自己的榴弹和手雷不伤基地。
+func explode(pos: Vector2, damage: float, radius: float, friendly: bool, spare_base := false) -> void:
 	fx.explosion(pos, radius)
+	ordnance.hurt_decoys(pos, damage, radius)
 	decals.stamp(Art.scorch, pos + Vector2(0, 6))
 	Sfx.play("explode", -1.0, 0.1)
 	add_shake(0.75)
@@ -500,7 +511,8 @@ func explode(pos: Vector2, damage: float, radius: float, friendly: bool) -> void
 		if s.kind == "barrel":
 			s.take_damage.call_deferred(1000.0)
 		elif s.kind == "base":
-			s.take_damage(damage * 0.6)
+			if not spare_base:
+				s.take_damage(damage * 0.6)
 		elif not friendly:
 			s.take_damage(damage * 1.5)
 
@@ -570,7 +582,8 @@ func kick_camera(v: Vector2) -> void:
 
 
 func hitstop(seconds: float) -> void:
-	if Harness.bot != null or state == State.OVER:
+	# 核弹波及几十只僵尸，逐只停顿会把冲击波拖成慢动作
+	if Harness.bot != null or state == State.OVER or ordnance.nuke_active():
 		return
 	Engine.time_scale = 0.04
 	_stop_until_ms = maxi(_stop_until_ms, Time.get_ticks_msec() + int(seconds * 1000.0))
