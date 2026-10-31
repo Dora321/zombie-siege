@@ -282,13 +282,13 @@ func _move(move_input: Vector2, dt: float) -> void:
 			velocity *= 0.4
 	else:
 		var target: Vector2 = move_input.limit_length(1.0) * move_speed()
-		velocity = velocity.lerp(target, clampf(ACCEL * dt, 0.0, 1.0))
+		velocity = velocity.lerp(target, clampf(ACCEL * game.events.traction_at(position) * dt, 0.0, 1.0))
 	_knock = _knock.lerp(Vector2.ZERO, clampf(10.0 * dt, 0.0, 1.0))
 	position = map.move_box(position, (velocity + _knock) * dt, BOX_R, map.BLOCK_PLAYER)
 
 
 func move_speed() -> float:
-	return SPEED * speed_mult * (GameData.SPEED_BUFF if buff_speed_t > 0.0 else 1.0)
+	return SPEED * speed_mult * game.events.player_speed * (GameData.SPEED_BUFF if buff_speed_t > 0.0 else 1.0)
 
 
 func _animate(dt: float, _move_input: Vector2) -> void:

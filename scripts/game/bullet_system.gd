@@ -185,7 +185,7 @@ func _update_pools(dt: float) -> void:
 	var i := pools.size() - 1
 	while i >= 0:
 		var p := pools[i]
-		p.t -= dt
+		p.t -= dt * game.events.pool_decay
 		if p.t <= 0.0:
 			pools[i] = pools[pools.size() - 1]
 			pools.pop_back()

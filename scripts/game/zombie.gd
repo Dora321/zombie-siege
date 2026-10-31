@@ -174,7 +174,7 @@ func _physics_process(dt: float) -> void:
 		_update_separation()
 
 	var move_dir := _decide(dt)
-	var spd := _speed * _speed_mult
+	var spd: float = _speed * _speed_mult * game.events.zombie_speed_at(position)
 	if _rally_t > 0.0:
 		spd *= RALLY_SPEED
 	if _stagger_t > 0.0:
@@ -287,7 +287,7 @@ func _think() -> void:
 		return
 	if player != null and player.alive:
 		var d: float = position.distance_to(player.position)
-		if d < _aggro and map.line_clear(position, player.position, map.BLOCK_ZOMBIE):
+		if d < _aggro * game.events.aggro_mult and map.line_clear(position, player.position, map.BLOCK_ZOMBIE):
 			_chasing = true
 		elif _rally_t > 0.0 and map.line_clear(position, player.position, map.BLOCK_ZOMBIE):
 			_chasing = true

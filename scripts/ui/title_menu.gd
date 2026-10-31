@@ -7,6 +7,7 @@ const KINDS: Array[String] = ["walker", "walker", "runner", "walker", "spitter",
 @onready var help_button: Button = %HelpButton
 @onready var bestiary_button: Button = %BestiaryButton
 @onready var bestiary_panel: Control = %BestiaryPanel
+@onready var map_panel: Control = %MapPanel
 @onready var clear_button: Button = %ClearButton
 @onready var quit_button: Button = %QuitButton
 @onready var help_panel: Control = %HelpPanel
@@ -37,6 +38,8 @@ func _ready() -> void:
 	help_button.pressed.connect(_on_help)
 	bestiary_button.pressed.connect(_on_bestiary)
 	bestiary_panel.closed.connect(func(): start_button.grab_focus())
+	map_panel.closed.connect(func(): start_button.grab_focus())
+	map_panel.chosen.connect(start_game)
 	clear_button.pressed.connect(_on_clear)
 	quit_button.pressed.connect(func(): Sfx.quit_game())
 	help_close.pressed.connect(func():
@@ -88,6 +91,12 @@ func _refresh_scores() -> void:
 
 func _on_start() -> void:
 	Sfx.play("ui_click")
+	map_panel.open()
+
+
+func start_game(id: String) -> void:
+	Save.map_id = id
+	Save.save_all()
 	get_tree().change_scene_to_file("res://scenes/game.tscn")
 
 

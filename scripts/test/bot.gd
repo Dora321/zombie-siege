@@ -19,6 +19,9 @@ var _aim_error := 0.0
 var _aim_error_t := 0.0
 var _dash_wait := 0.0
 var _item_wait := 0.0
+var _nav_goal := -1
+var _nav_t := 0.0
+var _nav_field := PackedInt32Array()
 
 
 func _init(g: Node) -> void:
@@ -29,6 +32,7 @@ func tick(dt: float) -> void:
 	var p: Variant = game.player
 	if p == null or not p.alive:
 		return
+	_nav_t -= dt
 	_strafe_t -= dt
 	if _strafe_t <= 0.0:
 		_strafe_t = randf_range(0.8, 2.0)
@@ -56,7 +60,8 @@ func tick(dt: float) -> void:
 	var home: Vector2 = game.base.position + Vector2(0, 26)
 	if target == null:
 		firing = false
-		move = (home - p.position).limit_length(1.0) if p.position.distance_to(home) > 20.0 else Vector2.ZERO
+		move = go_to(p, home) if p.position.distance_to(home) > 20.0 else Vector2.ZERO
+		_fetch_crate(p)
 		_manage_reload(p)
 		return
 	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
@@ -68,7 +73,7 @@ func tick(dt: float) -> void:
 	aim_dir = from.direction_to(target.center()).rotated(_aim_error)
 	aim_point = target.center()
 	var target_d: float = p.position.distance_to(target.position)
-	firing = target_d < 210.0
+	firing = target_d < 210.0 and game.map.line_clear(from, target.center(), game.map.BLOCK_BULLET)
 	_pick_weapon(p, nearest_d, target)
 	_manage_reload(p)
 	_use_items(p, dt, target)
@@ -81,10 +86,12 @@ func tick(dt: float) -> void:
 			_dash_wait = (1.0 - skill) * 5.0
 	elif target_d > 170.0 or (game.zombies.size() <= 3 and target_d > 60.0):
 		# 残敌主动去追，距离太远子弹也打不到
-		move = p.position.direction_to(target.position)
+		move = go_to(p, target.position)
 	else:
-		move = p.position.direction_to(home) * 0.5 if p.position.distance_to(home) > 90.0 else Vector2.ZERO
+		move = go_to(p, home) * 0.5 if p.position.distance_to(home) > 90.0 else Vector2.ZERO
 		move += aim_dir.orthogonal() * _strafe * 0.5
+	if nearest_d > 60.0:
+		_fetch_crate(p)
 	# 红圈、毒雾、冲撞通道：直接跑开，通道上来不及就冲刺
 	var danger: Variant = game.hazards.threat_at(p.position, 8.0)
 	if danger != null:
@@ -101,7 +108,55 @@ func tick(dt: float) -> void:
 			return
 	# 被障碍挡住视线或路线时横向绕开
 	if not game.map.line_clear(p.position, target.position, game.map.BLOCK_BULLET | game.map.BLOCK_PLAYER):
-		move = (move * 0.3 + aim_dir.orthogonal() * _strafe).normalized()
+		if not _on_crate_run(p, nearest_d):
+			move = go_to(p, target.position)
+
+
+## 去捡补给箱，和人一样周围没僵尸贴脸时才去。
+func _fetch_crate(p: Variant) -> void:
+	var crate: Variant = game.events.nearest_crate(p.position)
+	if crate != null:
+		move = go_to(p, crate.pos)
+
+
+func _on_crate_run(p: Variant, nearest_d: float) -> bool:
+	return nearest_d > 60.0 and game.events.nearest_crate(p.position) != null
+
+
+## 按地形寻路走向目标：看得见就直走，否则沿广度优先场绕过去（窄巷地图必须这样）。
+func go_to(p: Variant, dest: Vector2) -> Vector2:
+	var map: Variant = game.map
+	# 中心线通不算数，身体两侧也要通，否则会顶着车角走不动
+	var side: Vector2 = p.position.direction_to(dest).orthogonal() * 7.0
+	if map.line_clear(p.position + side, dest + side, map.BLOCK_PLAYER) and map.line_clear(p.position - side, dest - side, map.BLOCK_PLAYER):
+		return p.position.direction_to(dest)
+	var goal: int = map.cell_of(dest)
+	if goal != _nav_goal and _nav_t <= 0.0 or _nav_field.is_empty():
+		_nav_goal = goal
+		_nav_t = 0.4
+		_nav_field = map.reach_field(goal, map.BLOCK_PLAYER)
+	var here: int = map.cell_of(p.position)
+	var best := -1
+	var best_d: int = _nav_field[here] if _nav_field[here] >= 0 else 1 << 30
+	var x: int = here % map.W
+	var y: int = here / map.W
+	for k in 8:
+		var nx: int = x + map.DIRS[k].x
+		var ny: int = y + map.DIRS[k].y
+		if not map.in_bounds(nx, ny):
+			continue
+		var j: int = map.idx(nx, ny)
+		var d: int = _nav_field[j]
+		if d < 0 or d >= best_d:
+			continue
+		# 斜着走不能切墙角
+		if k >= 4 and (map.blocks(map.idx(nx, y), map.BLOCK_PLAYER) or map.blocks(map.idx(x, ny), map.BLOCK_PLAYER)):
+			continue
+		best_d = d
+		best = j
+	if best < 0:
+		return p.position.direction_to(dest)
+	return p.position.direction_to(map.cell_center(best))
 
 
 func _usable(p: Variant, id: String) -> bool:
@@ -237,12 +292,12 @@ func _try_buy(id: String) -> bool:
 func _place_turret() -> bool:
 	# 沿围墙内圈放炮塔
 	var map: Variant = game.map
-	var spots := [
-		Vector2i(26, 17), Vector2i(37, 17), Vector2i(26, 26), Vector2i(37, 26),
-		Vector2i(28, 21), Vector2i(35, 21), Vector2i(31, 17), Vector2i(31, 26),
+	var offsets := [
+		Vector2i(-4, -3), Vector2i(7, -3), Vector2i(-4, 6), Vector2i(7, 6),
+		Vector2i(-2, 1), Vector2i(5, 1), Vector2i(1, -3), Vector2i(1, 6),
 	]
-	for s: Vector2i in spots:
-		var cell: int = map.idx(s.x, s.y)
+	for s: Vector2i in offsets:
+		var cell: int = map.idx(map.base_x0 + s.x, map.base_y0 + s.y)
 		if map.can_place_turret(cell):
 			return game.try_place_turret(cell)
 	return false

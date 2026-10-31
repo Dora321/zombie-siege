@@ -2,6 +2,7 @@ extends Node2D
 ## 世界地图：地面绘制、摆件生成、格子碰撞、流场寻路（僵尸都顺着它走向基地）。
 
 const WallPieceScene := preload("res://scenes/entities/wall_piece.tscn")
+const Layouts := preload("res://scripts/game/map_layouts.gd")
 
 const TILE := 16
 const W := 64
@@ -14,7 +15,7 @@ const BLOCK_ZOMBIE := 2
 const BLOCK_BULLET := 4
 const BLOCK_ALL := 7
 
-# 围墙环（含边）与四个路障门
+# 废墟街区的围墙环（含边）与四个路障门，其它地图用 map_layouts.gd 的格子布局
 const WALL_X0 := 23
 const WALL_X1 := 40
 const WALL_Y0 := 14
@@ -23,13 +24,13 @@ const GATE_X0 := 30
 const GATE_X1 := 33
 const GATE_Y0 := 20
 const GATE_Y1 := 23
-# 基地占地（格）
-const BASE_X0 := 30
-const BASE_X1 := 33
-const BASE_Y0 := 20
-const BASE_Y1 := 22
 
 const FLOW_INF := 1 << 30
+## 停车场画车位线的行。
+const STALL_ROWS: Array[int] = [7, 14, 24, 37]
+## 补给箱落点：离地图边缘几格以内，并尽量离玩家多远。
+const EDGE_BAND := 5
+const EDGE_FAR := 220.0
 const COST_WALL := 300
 const COST_BARRICADE := 130
 const COST_TURRET := 170
@@ -49,7 +50,18 @@ var pieces: Array = []
 var spawn_cells := {"top": [], "bottom": [], "left": [], "right": []}
 var base_cells: Array[int] = []
 var wall_tier := 0
+var map_id := "ruins"
+# 基地占地（格）
+var base_x0 := 30
+var base_x1 := 33
+var base_y0 := 20
+var base_y1 := 22
+var player_start := Vector2(32 * TILE, 25 * TILE)
+var minimap_tex: ImageTexture
 
+var _grid: Array = []
+var _compound := Rect2i(WALL_X0, WALL_Y0, WALL_X1 - WALL_X0 + 1, WALL_Y1 - WALL_Y0 + 1)
+var _barrel_spots: Array[int] = []
 var _ground: ImageTexture
 var _flow_dirty := false
 var _flow_wait := 0.0
@@ -68,15 +80,21 @@ func setup(g: Node, rng: RandomNumberGenerator) -> void:
 	next_cell.resize(W * H)
 	_base_mask.resize(W * H)
 	_base_mask.fill(0)
-	for y in range(BASE_Y0, BASE_Y1 + 1):
-		for x in range(BASE_X0, BASE_X1 + 1):
+	map_id = Save.map_id
+	_grid = Layouts.grid(map_id)
+	_read_layout()
+	for y in range(base_y0, base_y1 + 1):
+		for x in range(base_x0, base_x1 + 1):
 			var i := idx(x, y)
 			flags[i] = BLOCK_PLAYER | BLOCK_ZOMBIE
 			base_cells.append(i)
 			_base_mask[i] = 1
 	_build_ground(rng)
-	_build_walls()
-	_scatter_props(rng)
+	if _grid.is_empty():
+		_build_walls()
+		_scatter_props(rng)
+	else:
+		_build_from_grid(rng)
 	rebuild_flow()
 	_collect_spawns()
 	queue_redraw()
@@ -459,6 +477,9 @@ func alive_barrels() -> int:
 
 ## 波次之间补充炸药桶，让爆炸玩法贯穿全局。
 func respawn_barrels(rng: RandomNumberGenerator, count: int) -> void:
+	if not _grid.is_empty():
+		_respawn_barrels_at_spots(rng, count)
+		return
 	for attempt in count * 12:
 		if count <= 0:
 			return
@@ -472,6 +493,19 @@ func respawn_barrels(rng: RandomNumberGenerator, count: int) -> void:
 		if game.player != null and game.player.position.distance_to(cell_center(i)) < 32.0:
 			continue
 		_add_piece(x, y, "barrel")
+		count -= 1
+
+
+## 手工地图只在标好的点补桶，免得把窄巷堵死。
+func _respawn_barrels_at_spots(rng: RandomNumberGenerator, count: int) -> void:
+	var spots := _barrel_spots.duplicate()
+	while count > 0 and not spots.is_empty():
+		var i: int = spots.pop_at(rng.randi() % spots.size())
+		if flags[i] != 0:
+			continue
+		if game.player != null and game.player.position.distance_to(cell_center(i)) < 32.0:
+			continue
+		_add_piece(i % W, i / W, "barrel")
 		count -= 1
 
 
@@ -489,6 +523,102 @@ func can_place_turret(i: int) -> bool:
 # 地图生成
 # ---------------------------------------------------------------------------
 
+## 从格子布局读出基地、出生点和大院范围。
+func _read_layout() -> void:
+	if _grid.is_empty():
+		return
+	var base_rect := Rect2i()
+	var yard := Rect2i()
+	for y in H:
+		var row: String = _grid[y]
+		for x in W:
+			var at := Rect2i(x, y, 1, 1)
+			match row[x]:
+				"H":
+					base_rect = at if base_rect.size == Vector2i.ZERO else base_rect.merge(at)
+				"P":
+					player_start = Vector2(x * TILE + TILE * 0.5, y * TILE + TILE * 0.5)
+				"W", "B":
+					yard = at if yard.size == Vector2i.ZERO else yard.merge(at)
+	base_x0 = base_rect.position.x
+	base_y0 = base_rect.position.y
+	base_x1 = base_rect.end.x - 1
+	base_y1 = base_rect.end.y - 1
+	_compound = yard
+
+
+## 按格子布局摆出楼房、围墙和摆件。
+func _build_from_grid(rng: RandomNumberGenerator) -> void:
+	var mini := Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
+	for y in H:
+		var row: String = _grid[y]
+		for x in W:
+			match row[x]:
+				"#":
+					flags[idx(x, y)] = BLOCK_ALL
+					mini.set_pixel(x, y, Color(0.5, 0.48, 0.55, 0.75))
+				"W":
+					_add_piece(x, y, "wall")
+				"B":
+					_add_piece(x, y, "barricade")
+				"C":
+					_add_prop(x, y, Art.cars[rng.randi() % Art.cars.size()], 2)
+				"L":
+					_add_prop(x, y, Art.lamp_tex, 1)
+				"D":
+					_add_prop(x, y, Art.dumpster_tex, 1)
+				"R":
+					_barrel_spots.append(idx(x, y))
+	minimap_tex = ImageTexture.create_from_image(mini)
+	refresh_wall_faces()
+	respawn_barrels(rng, 8)
+
+
+## 从 start 向外跑一遍广度优先，返回每格的步数（到不了是 -1）。
+func reach_field(start: int, mask: int) -> PackedInt32Array:
+	var d := PackedInt32Array()
+	d.resize(W * H)
+	d.fill(-1)
+	d[start] = 0
+	var frontier: Array[int] = [start]
+	var head := 0
+	while head < frontier.size():
+		var i: int = frontier[head]
+		head += 1
+		var x := i % W
+		var y := i / W
+		for k in 4:
+			var nx := x + DIRS[k].x
+			var ny := y + DIRS[k].y
+			if not in_bounds(nx, ny):
+				continue
+			var j := ny * W + nx
+			if d[j] < 0 and flags[j] & mask == 0:
+				d[j] = d[i] + 1
+				frontier.append(j)
+	return d
+
+
+## 地图边缘一圈里，玩家走得到的空地上随便挑一格放补给箱，尽量离玩家远一点。
+func edge_spot(rng: RandomNumberGenerator, from: Vector2) -> Vector2:
+	var reach := reach_field(cell_of(from), BLOCK_PLAYER)
+	var near: Array[int] = []
+	var far: Array[int] = []
+	for y in H:
+		for x in W:
+			var margin := mini(mini(x, W - 1 - x), mini(y, H - 1 - y))
+			var i := idx(x, y)
+			if margin < 1 or margin > EDGE_BAND or flags[i] != 0 or reach[i] < 0:
+				continue
+			near.append(i)
+			if cell_center(i).distance_to(from) > EDGE_FAR:
+				far.append(i)
+	var pool: Array[int] = far if not far.is_empty() else near
+	if pool.is_empty():
+		return from
+	return cell_center(pool[rng.randi() % pool.size()])
+
+
 func _on_road(x: int, y: int) -> bool:
 	return (y >= GATE_Y0 and y <= GATE_Y1) or (x >= GATE_X0 and x <= GATE_X1)
 
@@ -498,6 +628,9 @@ func _inside_compound(x: int, y: int) -> bool:
 
 
 func _build_ground(rng: RandomNumberGenerator) -> void:
+	if not _grid.is_empty():
+		_build_grid_ground(rng)
+		return
 	var img := Image.create_empty(PIXEL_W, PIXEL_H, false, Image.FORMAT_RGBA8)
 	var patches := FastNoiseLite.new()
 	patches.seed = rng.randi()
@@ -563,7 +696,11 @@ func _paint_road_marks(img: Image) -> void:
 			continue
 		img.fill_rect(Rect2i(mid_x - 1, y, 2, 12), dash)
 	# 院内围绕基地的停机坪标线
-	var pad := Rect2i((BASE_X0 - 2) * TILE, (BASE_Y0 - 2) * TILE, (BASE_X1 - BASE_X0 + 5) * TILE, (BASE_Y1 - BASE_Y0 + 5) * TILE)
+	_paint_base_pad(img)
+
+
+func _paint_base_pad(img: Image) -> void:
+	var pad := Rect2i((base_x0 - 2) * TILE, (base_y0 - 2) * TILE, (base_x1 - base_x0 + 5) * TILE, (base_y1 - base_y0 + 5) * TILE)
 	for x in range(pad.position.x, pad.end.x, 8):
 		var c := Color("#c8a030") if (x / 8) % 2 == 0 else Color("#2c2c28")
 		img.fill_rect(Rect2i(x, pad.position.y, 8, 2), c)
@@ -572,6 +709,76 @@ func _paint_road_marks(img: Image) -> void:
 		var c := Color("#c8a030") if (y / 8) % 2 == 0 else Color("#2c2c28")
 		img.fill_rect(Rect2i(pad.position.x, y, 2, 8), c)
 		img.fill_rect(Rect2i(pad.end.x - 2, y, 2, 8), c)
+
+
+## 手工地图的地面：沥青或石板，楼房直接画进地面里。
+func _build_grid_ground(rng: RandomNumberGenerator) -> void:
+	var img := Image.create_empty(PIXEL_W, PIXEL_H, false, Image.FORMAT_RGBA8)
+	var style := String(GameData.MAPS[map_id]["ground"])
+	var patches := FastNoiseLite.new()
+	patches.seed = rng.randi()
+	patches.frequency = 0.11
+	var full := Rect2i(0, 0, TILE, TILE)
+	for y in H:
+		for x in W:
+			var set_name := style
+			if _compound.has_point(Vector2i(x, y)):
+				set_name = "concrete"
+			elif patches.get_noise_2d(x, y) > 0.2:
+				set_name = style + "_alt"
+			if _grid_is_solid(x, y):
+				set_name = "roof" if _grid_is_solid(x, y + 1) or y == H - 1 else "brick"
+			var set_tiles: Array = Art.tiles[set_name]
+			img.blit_rect(set_tiles[rng.randi() % set_tiles.size()], full, Vector2i(x * TILE, y * TILE))
+	if style == "asphalt":
+		_paint_stalls(img)
+	_paint_building_edges(img)
+	_paint_base_pad(img)
+	_ground = ImageTexture.create_from_image(img)
+
+
+func _grid_is_solid(x: int, y: int) -> bool:
+	return in_bounds(x, y) and String(_grid[y])[x] == "#"
+
+
+## 车位线：每排车上下各一道短白线，中间露出通道。
+func _paint_stalls(img: Image) -> void:
+	var line := Color("#b8b4a0")
+	for row: int in STALL_ROWS:
+		for x in range(3, W - 2, 3):
+			if _compound.has_point(Vector2i(x, row)):
+				continue
+			img.fill_rect(Rect2i(x * TILE - 1, (row - 1) * TILE + 6, 2, TILE * 2), line)
+	# 通道方向箭头
+	for x in range(6, W, 14):
+		for y: int in [3, 18, 33]:
+			if _compound.grow(1).has_point(Vector2i(x, y)):
+				continue
+			var at := Vector2i(x * TILE, y * TILE)
+			img.fill_rect(Rect2i(at, Vector2i(14, 2)), line)
+			img.fill_rect(Rect2i(at + Vector2i(10, -2), Vector2i(2, 6)), line)
+			img.fill_rect(Rect2i(at + Vector2i(12, -1), Vector2i(2, 4)), line)
+
+
+## 楼顶的亮边和暗边，楼脚投一点阴影，看着才有高度。
+func _paint_building_edges(img: Image) -> void:
+	var shade := Image.create_empty(TILE, 5, false, Image.FORMAT_RGBA8)
+	shade.fill(Color(0, 0, 0, 0.32))
+	var light := Color("#4c4a58")
+	var dark := Color("#1a1820")
+	for y in H:
+		for x in W:
+			var at := Vector2i(x * TILE, y * TILE)
+			if not _grid_is_solid(x, y):
+				if _grid_is_solid(x, y - 1):
+					img.blend_rect(shade, Rect2i(0, 0, TILE, 5), at)
+				continue
+			if y > 0 and not _grid_is_solid(x, y - 1):
+				img.fill_rect(Rect2i(at, Vector2i(TILE, 2)), light)
+			if x > 0 and not _grid_is_solid(x - 1, y):
+				img.fill_rect(Rect2i(at, Vector2i(1, TILE)), dark)
+			if x < W - 1 and not _grid_is_solid(x + 1, y):
+				img.fill_rect(Rect2i(at + Vector2i(TILE - 1, 0), Vector2i(1, TILE)), dark)
 
 
 func _prop_cell_ok(x: int, y: int) -> bool:

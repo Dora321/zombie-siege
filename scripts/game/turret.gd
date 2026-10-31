@@ -18,6 +18,7 @@ var _flash_t := 0.0
 var _kick := 0.0
 var _white := false
 var _bar_t := 0.0
+var _jam_shown := false
 
 @onready var barrel: Sprite2D = $Barrel
 @onready var base_sprite: Sprite2D = $Base
@@ -45,7 +46,7 @@ func refresh_level() -> void:
 
 
 func _range() -> float:
-	return 118.0 + 16.0 * (int(game.turret_level) - 1)
+	return (118.0 + 16.0 * (int(game.turret_level) - 1)) * game.events.turret_range
 
 
 func _physics_process(dt: float) -> void:
@@ -54,6 +55,14 @@ func _physics_process(dt: float) -> void:
 	_flash_t -= dt
 	_bar_t -= dt
 	_kick = move_toward(_kick, 0.0, dt * 26.0)
+	if game.events.jammed():
+		_tick_jam()
+		return
+	if _jam_shown:
+		_jam_shown = false
+		base_sprite.modulate = Color.WHITE
+		_white = false
+		queue_redraw()
 	if _scan_t <= 0.0:
 		_scan_t = 0.2
 		_target = _find_target()
@@ -71,6 +80,18 @@ func _physics_process(dt: float) -> void:
 		queue_redraw()
 
 
+## 电磁干扰：枪管耷拉，机身闪蓝光，不索敌不开火。
+func _tick_jam() -> void:
+	_jam_shown = true
+	_target = null
+	queue_redraw()
+	barrel.rotation = lerp_angle(barrel.rotation, PI * 0.5, 0.08)
+	barrel.position = Vector2(0, -9)
+	base_sprite.modulate = Color(0.7, 0.95, 1.6) if Engine.get_physics_frames() % 16 < 8 else Color.WHITE
+	if randf() < 0.04:
+		game.fx.zap(position + Vector2(randf_range(-6, 6), randf_range(-14, -2)))
+
+
 func _find_target() -> Variant:
 	var best: Variant = null
 	var best_d := _range()
@@ -86,7 +107,7 @@ func _find_target() -> Variant:
 
 func _fire(dir: Vector2) -> void:
 	var lvl := int(game.turret_level)
-	_cooldown = 0.32 * pow(0.88, lvl - 1)
+	_cooldown = 0.32 * pow(0.88, lvl - 1) * game.events.turret_rate()
 	var muzzle: Vector2 = position + Vector2(0, -9) + dir * 13.0
 	game.bullets.fire(muzzle, dir * 430.0, 10.0 * (1.0 + 0.32 * (lvl - 1)), 26.0, 0.42, 0, Color("#a0f0ff"), false)
 	game.fx.muzzle_flash(muzzle, dir, false)

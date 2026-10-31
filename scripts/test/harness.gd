@@ -5,6 +5,8 @@ extends Node
 ##   godot --headless --path . -- --sheet=DIR                       导出精灵预览 PNG
 ##   godot --path . -- --shots=DIR                                  窗口模式下自动截图
 ##   godot --path . --fixed-fps 60 -- --flowtest --flowshots=DIR    流程测试并给新武器道具截图
+##   godot --headless --path . --fixed-fps 60 -- --maptest --seed=1 三张地图和全部随机事件的校验
+## 机器人和截图模式可加 --map=parking|alley 选图，--event=night 等每波固定事件，--noevents 关事件
 
 const BotScript := preload("res://scripts/test/bot.gd")
 const Shop := preload("res://scripts/game/shop_catalog.gd")
@@ -48,10 +50,14 @@ func _ready() -> void:
 	if fixed_seed >= 0:
 		seed(fixed_seed)
 	start_wave = int(_args.get("wave", "1"))
+	if GameData.MAPS.has(String(_args.get("map", ""))):
+		Save.map_id = String(_args["map"])
 	if _args.has("sheet"):
 		_dump_sheets.call_deferred(String(_args["sheet"]))
 	elif _args.has("fontcheck"):
 		_font_check.call_deferred(String(_args["fontcheck"]))
+	elif _args.has("maptest"):
+		_mode = "map"
 	elif _args.has("flowtest"):
 		_mode = "flow"
 		if _args.has("flowshots"):
@@ -86,6 +92,8 @@ func on_title_ready(title: Node) -> void:
 		_start_from_title.call_deferred(title)
 	elif _mode == "shots":
 		_run_shots_title()
+	elif _mode == "map" and _game == null and _checks == 0:
+		_run_map_test.call_deferred(title)
 
 
 func _start_from_title(title: Node) -> void:
@@ -115,11 +123,20 @@ func _start_from_title(title: Node) -> void:
 		_check(title.bestiary_panel.page == 0, "图鉴翻页能循环")
 		title.bestiary_panel.close_button.pressed.emit()
 		_check(not title.bestiary_panel.visible, "僵尸图鉴可关闭")
-	title._on_start()
+		title._on_start()
+		_check(title.map_panel.visible, "开始游戏先打开选图")
+		title.map_panel.choose(Save.map_id)
+		return
+	title.start_game(Save.map_id)
 
 
 func on_game_ready(game: Node) -> void:
 	_game = game
+	# 流程测试的数量断言不能被随机事件干扰；事件有 --maptest 专门校验
+	game.events.enabled = not (_mode == "flow" or _mode == "map" or _args.has("noevents"))
+	game.events.forced = String(_args.get("event", ""))
+	if _mode == "bot":
+		print("[bot] 地图 %s，种子 %d" % [game.map.map_id, fixed_seed])
 	if _mode == "shots":
 		_run_shots_game()
 	if _mode == "bot" or _mode == "shots":
@@ -244,7 +261,7 @@ func _run_shots_title() -> void:
 	await get_tree().create_timer(0.3, true, false, true).timeout
 	await _save_shot("02_help")
 	get_tree().current_scene.help_panel.visible = false
-	get_tree().current_scene._on_start()
+	get_tree().current_scene.start_game(Save.map_id)
 
 
 func _run_shots_game() -> void:
@@ -1883,3 +1900,597 @@ func _flow_explosion_test(g: Variant) -> void:
 	var count_before: int = g.fx.blasts.size()
 	g.explode(g.player.position + Vector2(200, 0), 30.0, 40.0, false)
 	_check(g.fx.blasts.size() == count_before + 1, "爆炸特效生成")
+
+
+# ---------------------------------------------------------------------------
+# 地图和随机事件：三张图逐一校验布局，再在每张图上跑一遍全部事件
+# ---------------------------------------------------------------------------
+
+func _run_map_test(title: Node) -> void:
+	await _map_title_checks(title)
+	var obstacles := {}
+	for id: String in GameData.MAP_ORDER:
+		await _map_load(id)
+		var g: Variant = _game
+		print("[flow] ---- 地图 %s ----" % id)
+		_map_arena(g)
+		obstacles[id] = _map_layout_checks(g, id)
+		await _map_walk_checks(g)
+		_map_turret_checks(g)
+		_event_rule_checks(g)
+		await _event_night(g)
+		await _event_storm(g)
+		await _event_fog(g)
+		await _event_airdrop(g)
+		await _event_vanguard(g)
+		await _event_emp(g)
+		_check(g.state != g.State.OVER, "地图 %s 跑完事件后游戏没有结束" % id)
+	_check(int(obstacles["parking"]) < int(obstacles["ruins"]), "停车场障碍比废墟少（%d < %d）" % [obstacles["parking"], obstacles["ruins"]])
+	_check(int(obstacles["ruins"]) < int(obstacles["alley"]), "窄巷障碍比废墟多（%d > %d）" % [obstacles["alley"], obstacles["ruins"]])
+	_finish_flow()
+
+
+func _map_title_checks(title: Node) -> void:
+	title.click_gate.visible = false
+	var panel: Control = title.map_panel
+	title._on_start()
+	_check(panel.visible, "开始游戏先打开选图")
+	_check(panel.cards.size() >= 3, "至少三张地图可选（%d）" % panel.cards.size())
+	await _sec(0.1)
+	await _shot("70_map_select")
+	_send_key(KEY_ESCAPE, true)
+	_send_key(KEY_ESCAPE, false)
+	await _sec(0.1)
+	_check(not panel.visible, "Esc 关闭选图")
+	title._on_start()
+	panel.back_button.pressed.emit()
+	_check(not panel.visible, "返回按钮关闭选图")
+	var names := {}
+	for id: String in GameData.MAP_ORDER:
+		names[GameData.MAPS[id]["name"]] = true
+		var tex: Texture2D = panel.cards[id].icon
+		_check(tex != null and tex.get_size() == Vector2(128, 88), "地图 %s 有缩略图" % id)
+	_check(names.size() == GameData.MAP_ORDER.size(), "地图不重名")
+	title._on_start()
+	_check(panel.cards["ruins"].has_focus(), "选图默认聚焦上次的地图")
+	_send_key(KEY_RIGHT, true)
+	_send_key(KEY_RIGHT, false)
+	await _sec(0.1)
+	_check(panel.cards["parking"].has_focus(), "方向键能切换地图")
+	var escaped := false
+	for id: String in GameData.MAP_ORDER:
+		for side: Side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
+			var next: Control = panel.cards[id].find_valid_focus_neighbor(side)
+			escaped = escaped or next == null or not panel.is_ancestor_of(next)
+	_check(not escaped, "方向键不会跳到面板后面的按钮")
+	_game = null
+	_send_key(KEY_ENTER, true)
+	_send_key(KEY_ENTER, false)
+	while _game == null:
+		await get_tree().process_frame
+	_check(_game.map.map_id == "parking", "回车进入选中的地图")
+	_check(Save.map_id == "parking", "选择写入设置")
+	Save.load_all()
+	_check(Save.map_id == "parking", "选择能从存档读回")
+	var cfg := ConfigFile.new()
+	cfg.load(Save.path)
+	cfg.set_value("settings", "map", "no_such_map")
+	cfg.save(Save.path)
+	Save.load_all()
+	_check(Save.map_id == "ruins", "存档里的地图不存在时回到默认")
+	await _map_load("alley")
+	_game.pause_ui._restart()
+	_game = null
+	while _game == null:
+		await get_tree().process_frame
+	_check(_game.map.map_id == "alley", "暂停菜单重开沿用当前地图")
+
+
+func _map_load(id: String) -> void:
+	_game = null
+	Save.map_id = id
+	get_tree().change_scene_to_file("res://scenes/game.tscn")
+	while _game == null:
+		await get_tree().process_frame
+	await _sec(0.1)
+
+
+func _map_arena(g: Variant) -> void:
+	_test_bot = BotScript.new(g)
+	g.player.bot = _test_bot
+	g.god_mode = true
+	g.state = g.State.COMBAT
+	g._queue = ["walker"] as Array[String]
+	g._spawn_t = 99999.0
+	g.base_damage_scale = 0.0
+
+
+## 校验布局，返回不可破坏障碍的格数。
+func _map_layout_checks(g: Variant, id: String) -> int:
+	var m: Variant = g.map
+	var spec: Dictionary = GameData.MAPS[id]
+	_check(m.map_id == id, "加载的是所选地图")
+	_check(g.coins == int(spec["coins"]), "开局金币按地图设置（%d）" % g.coins)
+	var rows: Array = m.Layouts.grid(id)
+	if not rows.is_empty():
+		var sized: bool = rows.size() == m.H
+		for row: String in rows:
+			sized = sized and row.length() == m.W
+		_check(sized, "布局是 %dx%d" % [m.W, m.H])
+	_check(m.base_cells.size() == 12 and m.base_x1 - m.base_x0 == 3 and m.base_y1 - m.base_y0 == 2, "基地占 4x3 格")
+	_check(g.base.position.x == (m.base_x0 + 2) * m.TILE, "基地摆在布局指定的位置")
+	_check(not m._box_hits(m.player_start.x, m.player_start.y, g.player.BOX_R, m.BLOCK_PLAYER), "玩家出生点没有卡在障碍里")
+	_check(g.player.position.distance_to(m.player_start) < 40.0, "玩家从布局指定的位置出生")
+	var reach: PackedInt32Array = m.reach_field(m.cell_of(m.player_start), m.BLOCK_PLAYER)
+	var solid := 0
+	var pockets := 0
+	var unreachable := 0
+	for i in m.W * m.H:
+		if m.flags[i] == 0 and reach[i] < 0:
+			pockets += 1
+		if m.flags[i] & m.BLOCK_ZOMBIE != 0 and not m.structures.has(i):
+			solid += 1
+	_check(pockets == 0, "所有空地玩家都走得到（封闭 %d 格）" % pockets)
+	for side: String in ["top", "bottom", "left", "right"]:
+		var cells: Array = m.spawn_cells[side]
+		_check(cells.size() > 0, "%s 边有出怪点（%d）" % [side, cells.size()])
+		for cell: int in cells:
+			if reach[cell] < 0:
+				unreachable += 1
+			var at: int = cell
+			var steps := 0
+			while at >= 0 and not m.is_base_cell(at) and steps < m.W * m.H:
+				at = m.next_cell[at]
+				steps += 1
+			if at < 0 or not m.is_base_cell(at):
+				unreachable += 1
+	_check(unreachable == 0, "每个出怪点都有路到基地，玩家也走得到（不通 %d）" % unreachable)
+	if id == "alley":
+		_check(_alley_two_wide(m, rows), "窄巷最窄也有 2 格，能走能绕")
+		_check(m.minimap_tex != null, "窄巷的小地图画出楼房")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	var bad := 0
+	for k in 40:
+		var spot: Vector2 = m.edge_spot(rng, m.player_start)
+		var c: int = m.cell_of(spot)
+		var margin: int = mini(mini(c % m.W, m.W - 1 - c % m.W), mini(c / m.W, m.H - 1 - c / m.W))
+		if reach[c] < 0 or m.flags[c] != 0 or margin > m.EDGE_BAND:
+			bad += 1
+	_check(bad == 0, "补给箱落点都在地图边缘且走得到")
+	return solid
+
+
+func _alley_two_wide(m: Variant, rows: Array) -> bool:
+	var open := func(x: int, y: int) -> bool:
+		return m.in_bounds(x, y) and String(rows[y])[x] != "#"
+	for y in m.H:
+		for x in m.W:
+			if not open.call(x, y):
+				continue
+			var ok := false
+			for ox in [-1, 0]:
+				for oy in [-1, 0]:
+					if open.call(x + ox, y + oy) and open.call(x + ox + 1, y + oy) and open.call(x + ox, y + oy + 1) and open.call(x + ox + 1, y + oy + 1):
+						ok = true
+			if not ok:
+				print("[flow] 过窄的格子 ", x, ",", y)
+				return false
+	return true
+
+
+## 四个方向各放一只快跑僵尸，确认真的能走到基地附近。
+func _map_walk_checks(g: Variant) -> void:
+	var m: Variant = g.map
+	var racers := []
+	for side: String in ["top", "bottom", "left", "right"]:
+		g._spawn_side = side
+		g._spawn_zombie("runner")
+		var z: Variant = g.zombies[g.zombies.size() - 1]
+		racers.append({"z": z, "from": m.dist[m.cell_of(z.position)], "side": side})
+	await _sec(24.0)
+	for r: Dictionary in racers:
+		var z: Variant = r["z"]
+		var near: bool = not is_instance_valid(z) or z.dead or z.position.distance_to(g.base.position) < 170.0
+		_check(near, "%s 边的僵尸走到了基地附近（流场 %d -> %d）" % [r["side"], r["from"], m.dist[m.cell_of(z.position)] if is_instance_valid(z) else 0])
+	await _shot("71_walk_%s" % m.map_id)
+	_map_reset(g)
+
+
+func _map_turret_checks(g: Variant) -> void:
+	g.coins = 99999
+	for i in 8:
+		_test_bot._place_turret()
+	_check(g.turrets.size() >= 6, "炮塔点位都能放（%d）" % g.turrets.size())
+	for t: Variant in g.turrets.duplicate():
+		t.take_damage(99999.0)
+	_check(g.turrets.is_empty(), "炮塔能清掉")
+	g.map.rebuild_flow()
+	g.coins = 0
+
+
+func _map_reset(g: Variant) -> void:
+	for z: Variant in g.zombies.duplicate():
+		z.no_blast = true
+		z.dismissed = true
+		z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	g.ordnance.clear_field()
+	g.bullets.clear_hazards()
+	g.hazards.clear()
+	g.pickups.items.clear()
+	g.player.position = g.map.player_start
+	g.player.velocity = Vector2.ZERO
+	g.player.hp = g.player.max_hp
+	_test_bot.move = Vector2.ZERO
+	_test_bot.firing = false
+	_test_bot._nav_goal = -1
+	_test_bot._nav_t = 0.0
+
+
+func _ev_begin(g: Variant, id: String, wave: int) -> void:
+	var ev: Variant = g.events
+	ev.enabled = true
+	ev.forced = id
+	ev._plan_wave = 0
+	g._begin_countdown(wave)
+	await _sec(0.05)
+	if GameData.EVENTS[id]["slot"] == "weather":
+		_check((g.hud.event_warn_titles() as Array).has(String(GameData.EVENTS[id]["name"])), "%s 有预警提示" % GameData.EVENTS[id]["name"])
+	g.state = g.State.COMBAT
+	g._queue = ["walker"] as Array[String]
+	g._spawn_t = 99999.0
+
+
+func _ev_end(g: Variant) -> void:
+	var ev: Variant = g.events
+	ev.on_wave_cleared()
+	ev.forced = ""
+	ev.enabled = false
+	ev.crates.clear()
+	_check(is_equal_approx(ev.zombie_speed, 1.0) and is_equal_approx(ev.player_speed, 1.0) and is_equal_approx(ev.splash_mult, 1.0) and is_equal_approx(ev.arc_mult, 1.0) and is_equal_approx(ev.coin_mult, 1.0) and is_equal_approx(ev.aggro_mult, 1.0) and is_equal_approx(ev.turret_range, 1.0), "事件结束后倍率全部复原")
+	_check(not ev.jammed() and ev.weather == "", "事件结束后状态清空")
+	g.state = g.State.COMBAT
+	g.wave = 2
+	_map_reset(g)
+	await _sec(0.05)
+
+
+## 事件排期规则：和特殊波、Boss 波不冲突，不重名，保底不会连着两波没事件。
+func _event_rule_checks(g: Variant) -> void:
+	var ev: Variant = g.events
+	var wave_names := {}
+	for cfg: Dictionary in GameData.WAVES:
+		wave_names[cfg["name"]] = true
+	for id: String in GameData.EVENT_ORDER:
+		_check(not wave_names.has(GameData.EVENTS[id]["name"]), "事件「%s」不和波次重名" % GameData.EVENTS[id]["name"])
+	ev.enabled = true
+	ev.forced = ""
+	var seen := {}
+	var bad := []
+	var longest_quiet := 0
+	for run in 200:
+		ev._quiet_waves = 0
+		ev._last_weather = ""
+		ev._last_incident = ""
+		var quiet := 0
+		for wave in range(1, GameData.MAX_WAVE + 1):
+			ev.plan_wave(wave)
+			var weather: String = ev.planned_weather()
+			var incident: String = ev.planned_incident()
+			seen[weather] = true
+			seen[incident] = true
+			if wave == 1 and (weather != "" or incident != ""):
+				bad.append("第 1 波有事件")
+			if weather != "" and (GameData.wave_special(wave) != "" or GameData.boss_wave(wave)):
+				bad.append("第 %d 波叠了天气 %s" % [wave, weather])
+			if weather == "night" and wave == 11:
+				bad.append("黑夜降临叠了夜战")
+			if incident == "emp" and (wave == 12 or GameData.boss_wave(wave)):
+				bad.append("第 %d 波电磁干扰" % wave)
+			if GameData.boss_wave(wave) and incident != "" and incident != "airdrop":
+				bad.append("Boss 波有 %s" % incident)
+			quiet = quiet + 1 if weather == "" and incident == "" and wave > 1 else 0
+			longest_quiet = maxi(longest_quiet, quiet)
+	_check(bad.is_empty(), "事件和特殊波、Boss 波不冲突 %s" % str(bad.slice(0, 3)))
+	_check(longest_quiet <= 1, "不会连着两波没有事件（最长 %d）" % longest_quiet)
+	for id: String in GameData.EVENT_ORDER:
+		_check(seen.has(id), "事件 %s 会被抽到" % id)
+	ev.enabled = false
+	ev._plan_wave = 0
+
+
+## 实测一只普通僵尸沿流场走 1 秒的路程。
+func _zombie_pace(g: Variant) -> float:
+	var m: Variant = g.map
+	var cells: Array = m.spawn_cells["left"]
+	var start: int = cells[cells.size() / 2]
+	g._spawn_zombie("walker")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	z.position = m.cell_center(start)
+	z._speed = 30.0
+	z._phase = 0
+	await _sec(0.1)
+	var total := 0.0
+	var last: Vector2 = z.position
+	for i in 10:
+		await _sec(0.1)
+		total += last.distance_to(z.position)
+		last = z.position
+	z.no_blast = true
+	z.dismissed = true
+	z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	return total
+
+
+func _event_night(g: Variant) -> void:
+	var calm: float = await _zombie_pace(g)
+	await _ev_begin(g, "night", 3)
+	var ev: Variant = g.events
+	_check(ev.weather == "night", "夜战开始")
+	await _sec(1.4)
+	_check(ev.veil_alpha() > 0.6, "夜战画面变暗（%.2f）" % ev.veil_alpha())
+	_check((ev.chips() as Array).size() == 1, "HUD 标签显示夜战")
+	var pace: float = await _zombie_pace(g)
+	_check(pace > calm * 1.05, "夜战僵尸真的变快（%.1f -> %.1f）" % [calm, pace])
+	_test_bot.aim_point = g.player.position + Vector2(100, 0)
+	await _shot("72_night_%s" % g.map.map_id)
+	# 金币加成：杀一只普通僵尸，地上的金币按倍率结算
+	g.pickups.items.clear()
+	g._spawn_zombie("walker")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	z.position = g.player.position + Vector2(0, -200)
+	z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	var coins := 0
+	for it: Variant in g.pickups.items:
+		if it.kind == "coin":
+			coins += it.value
+	var expect: int = ceili(float(GameData.ZOMBIES["walker"]["coins"]) * 1.25)
+	_check(coins == expect, "夜战金币 +25%%（%d == %d）" % [coins, expect])
+	await _ev_end(g)
+	_check(g._combat_tint() != Color.BLACK, "夜战结束后色调正常")
+
+
+func _arc_hit(g: Variant) -> float:
+	g._spawn_zombie("tank")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	z.position = g.player.position + Vector2(40, z.center_h)
+	z._stun_t = 9.0
+	await _sec(0.05)
+	var hp0: float = z.hp
+	g.ordnance.arc(g.player.position, Vector2.RIGHT, 100.0, 10.0, 0, 40.0, 0.0)
+	await _sec(0.05)
+	var lost: float = hp0 - z.hp
+	z.no_blast = true
+	z.dismissed = true
+	z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	return lost
+
+
+## 放一只僵尸在爆炸半径边上，返回它有没有被炸到。
+func _splash_reaches(g: Variant) -> bool:
+	var at: Vector2 = g.player.position
+	g._spawn_zombie("tank")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	z.position = at + Vector2(0, -56 + z.center_h)
+	z._stun_t = 9.0
+	await _sec(0.05)
+	var hp0: float = z.hp
+	g.explode(at, 30.0, 50.0, true, true)
+	var hit: bool = z.hp < hp0
+	z.no_blast = true
+	z.dismissed = true
+	z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	await _sec(0.05)
+	return hit
+
+
+func _event_storm(g: Variant) -> void:
+	var calm: float = await _zombie_pace(g)
+	var calm_arc: float = await _arc_hit(g)
+	_check(await _splash_reaches(g), "晴天爆炸能炸到边上的僵尸")
+	await _ev_begin(g, "storm", 2)
+	var ev: Variant = g.events
+	var m: Variant = g.map
+	_check(g.player.move_speed() < g.player.SPEED, "暴雨玩家略慢（%.1f）" % g.player.move_speed())
+	var pace: float = await _zombie_pace(g)
+	_check(pace < calm * 0.95, "暴雨僵尸更慢（%.1f -> %.1f）" % [calm, pace])
+	_check(not await _splash_reaches(g), "暴雨爆炸范围变小")
+	var arc_hit: float = await _arc_hit(g)
+	_check(arc_hit > calm_arc * 1.2, "暴雨电弧枪更强（%.1f -> %.1f）" % [calm_arc, arc_hit])
+	var far: Vector2 = g.player.position + Vector2(0, 200)
+	g.bullets.add_pool(far, 4.0, 5.0)
+	await _sec(1.0)
+	_check(g.bullets.pools[g.bullets.pools.size() - 1].t < 3.6, "暴雨冲淡酸液池")
+	g.bullets.clear_hazards()
+	# 水洼：只铺在空地上，踩上去打滑
+	var wet_cell := -1
+	var dry_cell := -1
+	var wet_on_solid := 0
+	for i in m.W * m.H:
+		if ev._wet[i] == 1:
+			if m.flags[i] != 0:
+				wet_on_solid += 1
+			wet_cell = i
+		elif m.flags[i] == 0 and dry_cell < 0 and m.reach_field(m.cell_of(m.player_start), m.BLOCK_PLAYER)[i] >= 0:
+			dry_cell = i
+	_check(wet_cell >= 0, "暴雨铺了水洼")
+	_check(wet_on_solid == 0, "水洼不在障碍上")
+	_check(ev.zombie_speed_at(m.cell_center(wet_cell)) < ev.zombie_speed, "僵尸踩水更慢")
+	await _shot("73_storm_%s" % g.map.map_id)
+	var slide := func(cell: int) -> float:
+		g.player.position = m.cell_center(cell)
+		g.player.velocity = Vector2(90, 0)
+		return 0.0
+	slide.call(wet_cell)
+	await _sec(0.1)
+	var wet_v: float = g.player.velocity.length()
+	slide.call(dry_cell)
+	await _sec(0.1)
+	var dry_v: float = g.player.velocity.length()
+	_check(wet_v > dry_v * 1.5, "水洼里刹不住（%.1f > %.1f）" % [wet_v, dry_v])
+	await _ev_end(g)
+	_check(not ev.is_wet(m.cell_center(wet_cell)), "雨停后水洼消失")
+
+
+func _event_fog(g: Variant) -> void:
+	var noticed: bool = await _notices_player(g)
+	_check(noticed, "晴天僵尸能发现玩家")
+	g.turret_level = 1
+	await _ev_begin(g, "fog", 3)
+	var ev: Variant = g.events
+	await _sec(1.4)
+	_check(ev.veil_alpha() > 0.6, "大雾遮挡视野（%.2f）" % ev.veil_alpha())
+	_check(ev.turret_range < 1.0, "大雾炮塔射程变短")
+	noticed = await _notices_player(g)
+	_check(not noticed, "大雾里僵尸更难发现玩家")
+	await _shot("74_fog_%s" % g.map.map_id)
+	await _ev_end(g)
+
+
+func _notices_player(g: Variant) -> bool:
+	g._spawn_zombie("walker")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	z.position = g.player.position + Vector2(32, 0)
+	z._aggro = 40.0
+	z._recenter_t = 0.0
+	z._stun_t = 9.0
+	await _sec(0.05)
+	z._think()
+	var chasing: bool = z._chasing
+	z.no_blast = true
+	z.dismissed = true
+	z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	return chasing
+
+
+func _event_airdrop(g: Variant) -> void:
+	await _ev_begin(g, "airdrop", 3)
+	var ev: Variant = g.events
+	var m: Variant = g.map
+	ev._incident_t = 0.001
+	await _sec(0.1)
+	_check((g.hud.event_warn_titles() as Array).has("补给空投"), "空投有预警")
+	_check(ev.crates.is_empty(), "预警期间还没落箱")
+	await _sec(3.1)
+	_check(ev.crates.size() == 1, "预警后投下补给箱")
+	if ev.crates.is_empty():
+		await _ev_end(g)
+		return
+	var crate: Variant = ev.crates[0]
+	_check(crate.fall > 0.0, "箱子从空中落下")
+	await _sec(0.5)
+	await _shot("75_airdrop_fall_%s" % m.map_id)
+	await _sec(ev.FALL_TIME)
+	_check(crate.fall <= 0.0, "箱子落地")
+	_check((ev.chips() as Array).size() == 1, "HUD 标签提示去捡")
+	_check(m.reach_field(m.cell_of(g.player.position), m.BLOCK_PLAYER)[m.cell_of(crate.pos)] >= 0, "玩家走得到落点")
+	var coins0: int = g.coins
+	g.pickups.items.clear()
+	var waited := 0.0
+	while not ev.crates.is_empty() and waited < 28.0:
+		_test_bot.move = _test_bot.go_to(g.player, crate.pos)
+		await _sec(0.05)
+		waited += 0.05
+	_test_bot.move = Vector2.ZERO
+	_check(ev.crates.is_empty() and crate.life > 0.0, "限时内走过去捡到了（%.1f 秒）" % waited)
+	_check(g.pickups.items.size() >= 3, "开箱掉出金币、弹药和道具（%d）" % g.pickups.items.size())
+	await _sec(1.5)
+	_check(g.coins > coins0, "金币入账（%d -> %d）" % [coins0, g.coins])
+	g.player.position = m.player_start
+	# 限时：不捡就过期，也不给东西
+	var coins1: int = g.coins
+	g.pickups.items.clear()
+	ev.drop_crate(m.edge_spot(g._rng, g.player.position))
+	var late: Variant = ev.crates[0]
+	late.fall = 0.01
+	late.life = 0.2
+	await _sec(0.5)
+	_check(ev.crates.is_empty(), "过期的箱子会消失")
+	_check(g.pickups.items.is_empty() and g.coins == coins1, "过期的箱子不给东西")
+	# 商店里不计时，下一波还能去捡
+	ev.drop_crate(m.edge_spot(g._rng, g.player.position))
+	var kept: Variant = ev.crates[0]
+	g.state = g.State.SHOP
+	await _sec(0.3)
+	_check(is_equal_approx(kept.fall, ev.FALL_TIME), "商店里箱子不计时")
+	g.state = g.State.COMBAT
+	# 第 8 波起投两个
+	ev.crates.clear()
+	g.wave = 8
+	ev._incident = "airdrop"
+	ev._fire_incident()
+	_check(ev.crates.size() == 2, "后期波次投两个箱子")
+	await _ev_end(g)
+
+
+func _event_vanguard(g: Variant) -> void:
+	var ev: Variant = g.events
+	ev.enabled = true
+	ev.forced = "vanguard"
+	ev._plan_wave = 0
+	g.wave = 6
+	var full: int = GameData.build_spawn_queue(6).size()
+	g._begin_countdown(6)
+	_check(g.state == g.State.COUNTDOWN, "先遣尸群在波前触发")
+	_check(g._state_t > g.COUNTDOWN_TIME, "倒计时加长了")
+	_check(g.zombies.is_empty() and g._queue.size() == full, "预警时还没出怪")
+	await _sec(0.1)
+	_check((g.hud.event_warn_titles() as Array).has("先遣尸群"), "先遣尸群有预警")
+	await _sec(1.6)
+	_check(g.state == g.State.COUNTDOWN, "先遣尸群出现时还在倒计时")
+	_check(g.zombies.size() == GameData.VANGUARD_COUNT + 1, "提前刷出一小撮（%d）" % g.zombies.size())
+	_check(g.zombies.size() + g._queue.size() == full, "本波总数不变（%d）" % full)
+	var kinds_ok := true
+	for z: Variant in g.zombies:
+		kinds_ok = kinds_ok and (z.kind == "walker" or z.kind == "runner")
+	_check(kinds_ok, "先遣的都是小怪")
+	await _shot("76_vanguard_%s" % g.map.map_id)
+	g._queue = ["walker"] as Array[String]
+	g._spawn_t = 99999.0
+	g.state = g.State.COMBAT
+	await _ev_end(g)
+
+
+func _event_emp(g: Variant) -> void:
+	var m: Variant = g.map
+	# 没有炮塔时换成空投，不白等
+	await _ev_begin(g, "emp", 4)
+	var ev: Variant = g.events
+	ev.begin_incident("emp")
+	_check(ev._incident == "airdrop", "没有炮塔时电磁干扰换成空投")
+	ev._incident = ""
+	ev._warn_t = -1.0
+	g.coins = 99999
+	var cell: int = m.cell_of(m.player_start) + 3
+	_check(g.try_place_turret(cell), "放一座测试炮塔")
+	g.coins = 0
+	var t: Variant = g.turrets[0]
+	g._spawn_zombie("tank")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	z.position = t.position + Vector2(40, z.center_h - 6.0)
+	z.hp = 1e6
+	z.max_hp = 1e6
+	z._stun_t = 999.0
+	await _sec(1.5)
+	_check(z.hp < 1e6, "平时炮塔会开火")
+	ev.begin_incident("emp")
+	_check((g.hud.event_warn_titles() as Array).has("电磁干扰"), "电磁干扰有预警")
+	_check(not ev.jammed(), "预警期间炮塔还能打")
+	await _sec(3.1)
+	_check(ev.jammed(), "预警后炮塔被干扰")
+	await _sec(0.5)
+	var hp_jam: float = z.hp
+	await _shot("77_emp_%s" % m.map_id)
+	await _sec(2.0)
+	_check(is_equal_approx(z.hp, hp_jam), "干扰期间炮塔不开火")
+	_check((ev.chips() as Array).size() >= 1, "HUD 显示电磁干扰")
+	await _sec(GameData.EMP_JAM_TIME - 2.2)
+	_check(not ev.jammed() and ev.overclock_t > 0.0, "干扰结束转入过载")
+	_check(ev.turret_rate() < 1.0, "过载时射速提升")
+	var hp_over: float = z.hp
+	await _sec(1.0)
+	_check(z.hp < hp_over, "干扰结束后炮塔恢复开火")
+	t.take_damage(99999.0)
+	g.map.rebuild_flow()
+	await _ev_end(g)
+

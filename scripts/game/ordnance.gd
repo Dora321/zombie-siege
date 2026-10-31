@@ -294,7 +294,8 @@ func _flash_burst(pos: Vector2, radius: float, seconds: float) -> void:
 # 电弧枪：打中第一只后在附近连跳
 # ---------------------------------------------------------------------------
 
-func arc(from: Vector2, dir: Vector2, length: float, damage: float, chain: int, jump: float, knock: float) -> void:
+func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: int, jump: float, knock: float) -> void:
+	var damage: float = base_damage * game.events.arc_mult
 	game.bullets.shots_fired += 1
 	var first: Variant = _arc_first(from, dir, length)
 	if first == null:

@@ -23,7 +23,7 @@ var _white := false
 
 func setup(g: Node, map: Node2D) -> void:
 	game = g
-	position = Vector2((map.BASE_X0 + map.BASE_X1 + 1) * map.TILE * 0.5, (map.BASE_Y1 + 1) * map.TILE)
+	position = Vector2((map.base_x0 + map.base_x1 + 1) * map.TILE * 0.5, (map.base_y1 + 1) * map.TILE)
 	for i: int in map.base_cells:
 		map.structures[i] = self
 	_update_stage()

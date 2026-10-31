@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/game/world_map.gd" id="2"]
@@ -12,6 +12,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/game_over.tscn" id="10"]
 [ext_resource type="Script" path="res://scripts/game/ordnance.gd" id="11"]
 [ext_resource type="Script" path="res://scripts/game/hazards.gd" id="12"]
+[ext_resource type="Script" path="res://scripts/game/world_events.gd" id="13"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1")
@@ -21,6 +22,9 @@ script = ExtResource("2")
 
 [node name="Decals" type="Node2D" parent="."]
 script = ExtResource("3")
+
+[node name="Events" type="Node2D" parent="."]
+script = ExtResource("13")
 
 [node name="Pickups" type="Node2D" parent="."]
 script = ExtResource("4")

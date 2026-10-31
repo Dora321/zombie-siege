@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/title_menu.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/ui/bestiary.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/ui/map_select.gd" id="3"]
 
 [node name="Title" type="Control"]
 layout_mode = 3
@@ -70,7 +71,7 @@ offset_right = 480.0
 offset_bottom = 268.0
 theme_override_colors/font_color = Color(0.75, 0.73, 0.68, 1)
 theme_override_font_sizes/font_size = 12
-text = "守住中央基地，撑过 15 波尸潮"
+text = "守住基地，撑过 15 波尸潮"
 horizontal_alignment = 1
 
 [node name="HelpPanel" type="PanelContainer" parent="."]
@@ -102,13 +103,13 @@ Shift 或空格 冲刺（无敌、有冷却）
 Q 或中键 用道具    E 切道具
 0 医疗包    - 手雷    = 核弹
 Esc 或 P 暂停    F11 或 F 全屏
-
-目标：守住中央基地，撑过 15 波即胜利
+目标：守住基地，撑过 15 波即胜利
 失败：基地被摧毁，或玩家生命归零
-波次之间打开商店，解锁武器、买道具、修墙
-放炮塔。玩家可穿过路障，僵尸不行
-第 5、10、15 波是 Boss 阶段战，地上亮红圈就快躲
-各种精英的克制办法见标题界面的「僵尸图鉴」"
+波次之间打开商店，解锁武器、买道具、修墙、放炮塔
+玩家可穿过路障，僵尸不行
+第 5、10、15 波是 Boss 战，地上亮红圈就快躲
+天气和空投等随机事件看屏幕提示和右上角标签
+精英的克制办法见标题界面的「僵尸图鉴」"
 
 [node name="HelpClose" type="Button" parent="HelpPanel/VBox"]
 unique_name_in_owner = true
@@ -151,6 +152,26 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 text = "关闭"
+
+[node name="MapPanel" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 14.0
+offset_top = 6.0
+offset_right = 466.0
+offset_bottom = 264.0
+script = ExtResource("3")
+
+[node name="MapBack" type="Button" parent="MapPanel"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 0
+offset_left = 190.0
+offset_top = 234.0
+offset_right = 262.0
+offset_bottom = 252.0
+text = "返回"
 
 [node name="ClickGate" type="ColorRect" parent="."]
 unique_name_in_owner = true

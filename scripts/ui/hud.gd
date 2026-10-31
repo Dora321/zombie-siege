@@ -19,6 +19,7 @@ var _alert_t := 0.0
 var _shown_coins := 0
 var _flash_a := 0.0
 var _flash_color := Color.WHITE
+var _warns: Array[Dictionary] = []
 
 
 func setup(g: Node) -> void:
@@ -46,6 +47,13 @@ func alert_base() -> void:
 	_alert_t = 2.0
 
 
+## 随机事件的预警条，显示在波次公告下面，不抢 Boss 公告的位置。最多同时两条。
+func event_warn(title: String, sub: String, duration: float, color: Color) -> void:
+	_warns.append({"title": title, "sub": sub, "t": duration, "dur": duration, "color": color})
+	if _warns.size() > 2:
+		_warns.pop_front()
+
+
 ## 闪光弹和核弹的全屏白闪。
 func screen_flash(strength: float, color: Color) -> void:
 	_flash_a = maxf(_flash_a, strength)
@@ -57,6 +65,11 @@ func _process(dt: float) -> void:
 	_hurt = maxf(_hurt - dt, 0.0)
 	_alert_t = maxf(_alert_t - dt, 0.0)
 	_flash_a = maxf(_flash_a - dt * 2.2, 0.0)
+	if not get_tree().paused:
+		for i in range(_warns.size() - 1, -1, -1):
+			_warns[i]["t"] = float(_warns[i]["t"]) - dt
+			if float(_warns[i]["t"]) <= 0.0:
+				_warns.remove_at(i)
 	if game != null:
 		_shown_coins = int(move_toward(_shown_coins, game.coins, maxf(1.0, dt * 200.0)))
 	queue_redraw()
@@ -75,10 +88,14 @@ func _draw() -> void:
 		_draw_items()
 		_draw_minimap()
 		_draw_base_pointer()
+		_draw_crate_pointers()
+		_draw_event_chips()
 	if _flash_a > 0.0:
 		draw_rect(Rect2(0, 0, W, H), Color(_flash_color.r, _flash_color.g, _flash_color.b, minf(_flash_a, 0.9)))
 	if _announce_t > 0.0 and not get_tree().paused:
 		_draw_announce()
+	if not get_tree().paused and not in_shop:
+		_draw_event_warns()
 	if _alert_t > 0.0 and int(_alert_t * 5.0) % 2 == 0 and not in_shop:
 		Art.draw_text(self, "基地遭到攻击！", Vector2(W * 0.5, 44 if game.boss_list.is_empty() else 51), 12, Color("#ff7050"), 1)
 	if game.state == game.State.PLACING:
@@ -243,21 +260,30 @@ func _draw_minimap() -> void:
 	var mh: int = map.H
 	var origin := Vector2(W - mw - 3, H - mh - 3)
 	draw_rect(Rect2(origin - Vector2(1, 1), Vector2(mw + 2, mh + 2)), Color(0.75, 0.72, 0.65, 0.7), false, 1.0)
-	draw_rect(Rect2(origin, Vector2(mw, mh)), Color(0.08, 0.13, 0.08, 0.72))
+	var mini_bg := Color(String(GameData.MAPS[map.map_id]["mini"]))
+	mini_bg.a = 0.72
+	draw_rect(Rect2(origin, Vector2(mw, mh)), mini_bg)
+	if map.minimap_tex != null:
+		draw_texture(map.minimap_tex, origin)
 	var tile: int = map.TILE
 	for piece: Variant in map.pieces:
 		if piece.alive and piece.kind != "barrel":
 			var cell: int = piece.cell
 			var c := Color("#b0aca0") if piece.kind == "wall" else Color("#a07840")
 			draw_rect(Rect2(origin + Vector2(cell % mw, cell / mw), Vector2(1, 1)), c)
-	draw_rect(Rect2(origin + Vector2(map.BASE_X0, map.BASE_Y0), Vector2(4, 3)), COL_BASE)
+	draw_rect(Rect2(origin + Vector2(map.base_x0, map.base_y0), Vector2(4, 3)), COL_BASE)
 	for t: Variant in game.turrets:
 		draw_rect(Rect2(origin + (t.position / tile).floor(), Vector2(1, 1)), Color("#70e090"))
+	# 电磁干扰时雷达失灵，小地图上看不到僵尸
+	var radar_ok: bool = not game.events.jammed()
 	for z: Variant in game.zombies:
-		if z.cloaked():
+		if z.cloaked() or not radar_ok:
 			continue
 		var col := Color("#ff4030") if not z.is_boss else Color("#ffe040")
 		draw_rect(Rect2(origin + (z.position / tile).floor(), Vector2(1, 1)), col)
+	for c: Variant in game.events.crates:
+		if int(Time.get_ticks_msec() / 200) % 2 == 0:
+			draw_rect(Rect2(origin + (c.pos / tile).floor() - Vector2(1, 1), Vector2(3, 3)), Color("#ffe060"))
 	var pp: Vector2 = game.player.position / tile
 	draw_rect(Rect2(origin + pp.floor() - Vector2(1, 1), Vector2(3, 3)), Color.WHITE)
 
@@ -277,6 +303,57 @@ func _draw_base_pointer() -> void:
 	var tip := at + dir * 5.0
 	draw_colored_polygon(PackedVector2Array([tip, at + side * 3.0, at - side * 3.0]), COL_BASE)
 	draw_texture(Art.shield_tex, (at - dir * 9.0 - Vector2(4, 4)).round())
+
+
+## 屏幕外的补给箱：屏幕边缘画一个黄色箭头。
+func _draw_crate_pointers() -> void:
+	var cam: Vector2 = game.camera.position
+	var center := Vector2(W, H) * 0.5
+	for c: Variant in game.events.crates:
+		var to: Vector2 = c.pos - cam
+		if absf(to.x) < W * 0.5 - 8 and absf(to.y) < H * 0.5 - 8:
+			continue
+		var at := center + to * minf((W * 0.5 - 20) / maxf(absf(to.x), 0.01), (H * 0.5 - 44) / maxf(absf(to.y), 0.01))
+		var dir := to.normalized()
+		var side := dir.orthogonal()
+		draw_colored_polygon(PackedVector2Array([at + dir * 6.0, at + side * 4.0, at - side * 4.0]), Color("#ffe060"))
+		draw_texture(Art.item_tex["ammo_crate"], (at - dir * 10.0 - Vector2(6, 5)).round())
+
+
+## 进行中的事件：右上角分数和连杀下面，一行一个。
+func _draw_event_chips() -> void:
+	var y := 45
+	for chip: Dictionary in game.events.chips():
+		var color: Color = chip["color"]
+		Art.draw_text(self, String(chip["text"]), Vector2(W - 4, y), 12, color, 2)
+		y += 13
+		var ratio: float = chip["ratio"]
+		if ratio >= 0.0:
+			draw_rect(Rect2(W - 62, y, 58.0 * clampf(ratio, 0.0, 1.0), 1), color)
+			y += 3
+
+
+## 事件预警条：比波次公告小一号，放在公告下面。
+func _draw_event_warns() -> void:
+	var y := 108.0
+	for warn: Dictionary in _warns:
+		var left: float = warn["t"]
+		var alpha := clampf(left * 2.5, 0.0, 1.0)
+		var color: Color = warn["color"]
+		draw_rect(Rect2(0, y, W, 28), Color(0, 0, 0, 0.55 * alpha))
+		draw_rect(Rect2(0, y, 3, 28), Color(color.r, color.g, color.b, alpha))
+		draw_rect(Rect2(W - 3, y, 3, 28), Color(color.r, color.g, color.b, alpha))
+		Art.draw_text(self, "注意：%s" % warn["title"], Vector2(W * 0.5, y + 1.0), 12, Color(color.r, color.g, color.b, alpha), 1)
+		Art.draw_text(self, String(warn["sub"]), Vector2(W * 0.5, y + 14.0), 12, Color(0.92, 0.9, 0.84, alpha), 1)
+		y += 30.0
+
+
+## 测试用：当前预警条的标题。
+func event_warn_titles() -> Array[String]:
+	var out: Array[String] = []
+	for warn: Dictionary in _warns:
+		out.append(String(warn["title"]))
+	return out
 
 
 func _draw_announce() -> void:

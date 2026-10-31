@@ -273,6 +273,82 @@ const ACID_RAIN_GAP := 3.2
 const ACID_RAIN_COUNT := 3
 const ACID_RAIN_DAMAGE := 10.0
 
+## 三张地图。布局见 map_layouts.gd（废墟街区在 world_map.gd 里程序生成）。
+## coins 开局金币，base_scale 基地受伤系数，group 一批僵尸从同一方向来的数量（越小越容易被包抄），
+## group_grow 每隔几波多一只，look_gain 和 look_limit 控制镜头往准星方向看多远。
+const MAP_ORDER: Array[String] = ["ruins", "parking", "alley"]
+const MAPS := {
+	"ruins": {
+		"name": "废墟街区", "tag": "攻守均衡", "ground": "grass", "tint": "#ffffff", "mini": "#14210f",
+		"desc": ["完整的围墙和四条大路，树和废车能挡子弹。", "僵尸一批批从一个方向来，攻守均衡。", "第一次玩选这里。"],
+		"coins": 130, "base_scale": 0.42, "group": [3, 5], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
+		"preview": {"floor": "#4e7a3c", "road": "#3c3e46", "solid": "#2c3a22", "prop": "#2e5226"},
+	},
+	"parking": {
+		"name": "露天停车场", "tag": "开阔易被包抄 · 开局多 20 金币", "ground": "asphalt", "tint": "#fff4e0", "mini": "#23232a",
+		"desc": ["障碍少，视线开阔，镜头能看得更远，枪线通畅。", "只有四角矮墙，僵尸不断换方向，很容易被包抄。", "炮塔枪线好，但要四面都照顾到。"],
+		"coins": 150, "base_scale": 0.42, "group": [1, 2], "group_grow": 4, "look_gain": 0.42, "look_limit": 260.0,
+		"preview": {"floor": "#44464e", "road": "#44464e", "solid": "#26262c", "prop": "#a8a498"},
+	},
+	"alley": {
+		"name": "窄巷迷宫", "tag": "狭窄适合卡位 · 开局多 20 金币", "ground": "cobble", "tint": "#dce6ff", "mini": "#191c26",
+		"desc": ["楼房夹着两三格宽的巷子，僵尸排成长队来。", "一座炮塔卡住路口就很值，手雷和电弧也打得满。", "但小心被前后堵死，跑之前先看小地图。"],
+		"coins": 150, "base_scale": 0.42, "group": [4, 7], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
+		"preview": {"floor": "#6a645c", "road": "#6a645c", "solid": "#2a2833", "prop": "#4a7a58"},
+	},
+}
+
+## 随机事件。slot 为 weather 的持续整波、开打前预警；slot 为 incident 的是波中或波前的一次性事件。
+## skip 列出不触发的波次：第 11 波「黑夜降临」不再叠夜战，第 12 波「断电之夜」不再叠电磁干扰。
+## 第 8、12 波已有特殊天气，不叠 weather；Boss 波要看清红圈，只可能有补给空投。规则见 event_allowed。
+const EVENT_ORDER: Array[String] = ["night", "storm", "fog", "airdrop", "vanguard", "emp"]
+const EVENTS := {
+	"night": {
+		"name": "夜战", "slot": "weather", "color": "#a8b4ff", "min_wave": 3, "skip": [11],
+		"sub": "只看得清身边和准星处；僵尸加速，但金币 +25%", "chip": "僵尸快 金币多",
+		"zombie_speed": 1.12, "coin_mult": 1.25, "tint": "#c8d0ff",
+	},
+	"storm": {
+		"name": "暴雨", "slot": "weather", "color": "#80c8ff", "min_wave": 2,
+		"sub": "都走得慢，水洼打滑，爆炸变小；电弧枪伤害 +35%", "chip": "水洼滑 电弧强",
+		"zombie_speed": 0.88, "player_speed": 0.92, "splash": 0.8, "arc": 1.35, "pool_decay": 1.8, "tint": "#c0d4e8",
+	},
+	"fog": {
+		"name": "大雾", "slot": "weather", "color": "#d0d8d8", "min_wave": 3,
+		"sub": "看不远，炮塔射程变短；僵尸也更难发现你", "chip": "僵尸难发现你",
+		"aggro": 0.55, "turret_range": 0.8, "tint": "#e8ecec",
+	},
+	"airdrop": {
+		"name": "补给空投", "slot": "incident", "color": "#ffe060", "min_wave": 2, "warn_t": 3.0,
+		"sub": "运输机飞过，地图边缘有补给箱，限时去捡！", "chip": "去捡补给箱",
+	},
+	"vanguard": {
+		"name": "先遣尸群", "slot": "incident", "color": "#ff9070", "min_wave": 4, "warn_t": 1.5,
+		"sub": "有一小撮僵尸提前摸过来了，从%s来，本波总数不变", "chip": "",
+	},
+	"emp": {
+		"name": "电磁干扰", "slot": "incident", "color": "#70e8ff", "min_wave": 4, "warn_t": 3.0,
+		"sub": "炮塔和雷达快要失灵了，靠你顶一会儿，恢复后炮塔过载", "chip": "炮塔停火 雷达失灵",
+	},
+}
+const EVENT_WEATHER_CHANCE := 0.4
+const EVENT_INCIDENT_CHANCE := 0.55
+## 补给箱：落地后能留多久，开箱给多少钱。
+const CRATE_LIFE := 30.0
+const CRATE_COINS := 40
+const CRATE_COINS_PER_WAVE := 8
+const CRATE_ITEMS: Array[String] = ["medkit", "armor", "frag", "sticky", "flash", "decoy", "ammo_crate", "inf_ammo", "speed", "damage"]
+## 水洼：玩家打滑（加速度倍率），僵尸踩水再慢一点。
+const WET_TRACTION := 0.22
+const WET_ZOMBIE_SPEED := 0.8
+## 电磁干扰：停火多久，之后过载多久、射速倍率。
+const EMP_JAM_TIME := 7.0
+const EMP_OVERCLOCK_TIME := 7.0
+const EMP_OVERCLOCK_RATE := 0.6
+## 先遣尸群：从本波队列里提前放多少只，倒计时加长多少秒。
+const VANGUARD_COUNT := 4
+const VANGUARD_EXTRA_TIME := 4.0
+
 ## 手工设计的 15 波节奏：新敌人逐波登场，第 5、10、15 波是 Boss 阶段战，第 8、12 波是特殊波。
 const WAVES := [
 	{"name": "先头部队", "walker": 9},
@@ -393,3 +469,23 @@ func spawn_interval(wave: int) -> float:
 
 func wave_bonus(wave: int) -> int:
 	return 90 + wave * 30
+
+
+func boss_wave(wave: int) -> bool:
+	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
+	for kind: String in BOSSES.keys():
+		if cfg.has(kind):
+			return true
+	return false
+
+
+## 这一波能不能触发这个事件，避开和特殊波、Boss 波重复或冲突的组合。
+func event_allowed(id: String, wave: int) -> bool:
+	var spec: Dictionary = EVENTS[id]
+	if wave < int(spec["min_wave"]) or (spec.get("skip", []) as Array).has(wave):
+		return false
+	if boss_wave(wave):
+		return id == "airdrop"
+	if wave_special(wave) != "":
+		return spec["slot"] != "weather" and id != "emp"
+	return true

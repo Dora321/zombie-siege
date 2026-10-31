@@ -16,7 +16,6 @@ const BUCKET := 32
 const BUCKET_W := 33
 const BUCKET_H := 23
 const COMBO_WINDOW := 2.6
-const CAMERA_LOOK := 0.2
 ## 召唤物和分裂小怪可以稍微超过同屏上限，免得分裂体死了没有小怪。
 const MINION_OVERFLOW := 15
 ## Boss 在场时普通僵尸出得慢一些，把注意力留给 Boss。
@@ -25,6 +24,7 @@ const BOSS_DOWN_HOLD := 2.2
 
 @onready var map: Node2D = $Map
 @onready var decals: Node2D = $Decals
+@onready var events: Node2D = $Events
 @onready var pickups: Node2D = $Pickups
 @onready var entities: Node2D = $Entities
 @onready var hazards: Node2D = $Hazards
@@ -84,6 +84,8 @@ var _over_t := -1.0
 var _hit_marker := 0.0
 var _boss_hold_t := 0.0
 var _acid_t := 0.0
+var _map_spec: Dictionary = {}
+var _map_tint := Color.WHITE
 
 
 func _ready() -> void:
@@ -96,6 +98,11 @@ func _ready() -> void:
 	_buckets.resize(BUCKET_W * BUCKET_H)
 	for i in _buckets.size():
 		_buckets[i] = []
+	_map_spec = GameData.MAPS[Save.map_id]
+	_map_tint = Color(String(_map_spec["tint"]))
+	coins = int(_map_spec["coins"])
+	base_damage_scale = float(_map_spec["base_scale"])
+	tint.color = _map_tint
 	map.setup(self, _rng)
 	decals.position = Vector2.ZERO
 	bullets.setup(self, map)
@@ -103,11 +110,12 @@ func _ready() -> void:
 	hazards.setup(self, map)
 	fx.setup(self, decals)
 	pickups.setup(self)
+	events.setup(self, map, _rng)
 	base = BaseScene.instantiate()
 	entities.add_child(base)
 	base.setup(self, map)
 	player = PlayerScene.instantiate()
-	player.position = Vector2(32 * map.TILE, 25 * map.TILE)
+	player.position = map.player_start
 	entities.add_child(player)
 	player.setup(self, map)
 	_cam_pos = player.position
@@ -214,6 +222,7 @@ func _begin_countdown(next_wave: int) -> void:
 		var dropped: int = map.alive_barrels()
 		if dropped < 10:
 			map.respawn_barrels(_rng, 2)
+	events.on_countdown(wave)
 	_tween_tint(_combat_tint())
 	var sub: String = GameData.wave_hint(wave)
 	if sub == "":
@@ -227,6 +236,7 @@ func _begin_combat() -> void:
 	_spawn_t = 0.0
 	Sfx.play("siren", -4.0, 0.0)
 	Sfx.play_music("combat")
+	events.on_combat()
 	for kind: String in GameData.BOSSES.keys():
 		if _queue.has(kind):
 			hud.announce("Boss 战：%s" % GameData.BOSSES[kind]["title"], "击退前锋后它就会现身", 2.6)
@@ -244,7 +254,8 @@ func _tick_spawner(dt: float) -> void:
 		_spawn_t *= BOSS_SPAWN_SLOW
 	if _group_left <= 0:
 		_spawn_side = ["top", "bottom", "left", "right"][_rng.randi() % 4]
-		_group_left = _rng.randi_range(3, 5 + wave / 2)
+		var group: Array = _map_spec["group"]
+		_group_left = _rng.randi_range(int(group[0]), int(group[1]) + wave / int(_map_spec["group_grow"]))
 	var burst := 1 + wave / 5
 	for i in burst:
 		if _queue.is_empty():
@@ -256,7 +267,10 @@ func _tick_spawner(dt: float) -> void:
 func _spawn_zombie(kind: String) -> void:
 	var cells: Array = map.spawn_cells[_spawn_side]
 	if cells.is_empty():
-		cells = map.spawn_cells["top"]
+		for side: String in map.spawn_cells.keys():
+			if not map.spawn_cells[side].is_empty():
+				cells = map.spawn_cells[side]
+				break
 	# 优先从道路方向过来，地图边缘看起来才有“涌向基地”的感觉
 	var cell: int = cells[_rng.randi() % cells.size()]
 	var offset := Vector2(_rng.randf_range(-4, 4), _rng.randf_range(-4, 4))
@@ -274,6 +288,25 @@ func _add_zombie(kind: String, pos: Vector2) -> Node2D:
 	z.setup(self, map, kind, pos, wave)
 	zombies.append(z)
 	return z
+
+
+## 先遣尸群：从本波队列里提前放几只小怪，从指定方向来。本波总数不变。
+func spawn_vanguard(side: String, count: int) -> int:
+	var sent := 0
+	var old_side := _spawn_side
+	_spawn_side = side
+	for kind: String in ["runner", "walker"]:
+		while sent < count and _queue.has(kind):
+			_queue.erase(kind)
+			_spawn_zombie(kind)
+			sent += 1
+	_spawn_side = old_side
+	return sent
+
+
+## 倒计时加长，给先遣尸群留出提前到场的时间。
+func extend_countdown(seconds: float) -> void:
+	_state_t += seconds
 
 
 ## 召唤物和分裂小怪。超过上限返回 null。
@@ -387,6 +420,7 @@ func _tick_ambience(dt: float) -> void:
 
 
 func _wave_cleared() -> void:
+	events.on_wave_cleared()
 	bullets.clear_hazards()
 	hazards.clear()
 	ordnance.clear_field()
@@ -397,7 +431,7 @@ func _wave_cleared() -> void:
 	score += 100 * wave + roundi(base.hp / base.max_hp * 100.0) * wave
 	Sfx.play("wave_clear")
 	Sfx.play_music("menu")
-	_tween_tint(Color.WHITE)
+	_tween_tint(_map_tint)
 	if wave >= GameData.MAX_WAVE:
 		victory = true
 		pickups.collect_all()
@@ -423,6 +457,10 @@ func start_next_wave() -> void:
 
 
 func _combat_tint() -> Color:
+	return _wave_tint() * _map_tint * events.tint_color()
+
+
+func _wave_tint() -> Color:
 	if GameData.wave_special(wave) == "blackout":
 		return Color(0.42, 0.45, 0.68)
 	if GameData.wave_special(wave) == "acid_rain":
@@ -501,7 +539,7 @@ func credit_kill(z: Variant, drops: bool) -> void:
 	if not drops:
 		pickups.drop(z.position, "coin", int(stat["coins"]))
 		return
-	var total: int = stat["coins"]
+	var total: int = ceili(float(stat["coins"]) * events.coin_mult)
 	# Boss 叫来的精英只给一半钱，否则站着刷怪比打 Boss 还赚
 	if z.master != null:
 		total = (total + 1) / 2
@@ -614,7 +652,8 @@ func _tick_game_over() -> void:
 # ---------------------------------------------------------------------------
 
 ## spare_base：玩家自己的榴弹和手雷不伤基地。
-func explode(pos: Vector2, damage: float, radius: float, friendly: bool, spare_base := false) -> void:
+func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool, spare_base := false) -> void:
+	var radius: float = explode_radius * events.splash_mult
 	fx.explosion(pos, radius)
 	ordnance.hurt_decoys(pos, damage, radius)
 	decals.stamp(Art.scorch, pos + Vector2(0, 6))
@@ -759,7 +798,7 @@ func _update_camera(dt: float) -> void:
 	if player.alive and player_can_walk():
 		var look: Vector2 = get_global_mouse_position() - player.position
 		if Harness.bot == null:
-			target += look.limit_length(160.0) * CAMERA_LOOK
+			target += look.limit_length(float(_map_spec["look_limit"])) * float(_map_spec["look_gain"])
 	_cam_pos = _cam_pos.lerp(target, clampf(dt * 7.0, 0.0, 1.0))
 	var half := Vector2(240, 135)
 	_cam_pos.x = clampf(_cam_pos.x, half.x, map.PIXEL_W - half.x)

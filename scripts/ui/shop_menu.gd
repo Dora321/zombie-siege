@@ -50,7 +50,7 @@ func _on_start() -> void:
 
 func refresh() -> void:
 	var p: Variant = game.player
-	title_label.text = "补给站  下一波：第 %d 波 %s" % [game.wave + 1, GameData.wave_name(game.wave + 1)]
+	title_label.text = "补给站  下一波：第 %d 波 %s%s" % [game.wave + 1, GameData.wave_name(game.wave + 1), game.events.forecast_text()]
 	status_label.text = "金币 %d    生命 %d/%d    基地 %d/%d    分数 %d" % [
 		game.coins, roundi(p.hp), roundi(p.max_hp), roundi(game.base.hp), roundi(game.base.max_hp), game.score,
 	]

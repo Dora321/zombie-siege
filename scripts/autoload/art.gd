@@ -179,6 +179,10 @@ var trees: Array[Texture2D] = []
 var rocks: Array[Texture2D] = []
 var cars: Array[Texture2D] = []
 var crate_tex: Texture2D
+var lamp_tex: Texture2D
+var dumpster_tex: Texture2D
+var supply_tex: Texture2D
+var chute_tex: Texture2D
 var turret_base_tex: Texture2D
 var turret_barrels: Array[Texture2D] = []
 var tiles: Dictionary = {}
@@ -931,6 +935,43 @@ func _build_props(rng: RandomNumberGenerator) -> void:
 		_px(crate, 11 - t, 6 + t, Color("#5a4224"))
 	_outline(crate)
 	crate_tex = _tex(crate)
+	_build_map_props()
+
+
+## 新地图的摆件和补给箱。
+func _build_map_props() -> void:
+	var lamp := _new(10, 32)
+	_rect(lamp, 4, 4, 2, 26, Color("#5e626c"))
+	_rect(lamp, 4, 4, 1, 26, Color("#7c8088"))
+	_rect(lamp, 1, 2, 8, 3, Color("#3e4048"))
+	_rect(lamp, 2, 5, 6, 1, Color("#f0e8a0"))
+	_rect(lamp, 3, 29, 4, 2, Color("#3e4048"))
+	_outline(lamp)
+	lamp_tex = _tex(lamp)
+	var bin := _new(16, 16)
+	_rect(bin, 1, 4, 14, 10, Color("#3a6a4a"))
+	_rect(bin, 1, 2, 14, 3, Color("#2c5238"))
+	_rect(bin, 3, 7, 10, 1, Color("#2c5238"))
+	_rect(bin, 3, 10, 10, 1, Color("#2c5238"))
+	_outline(bin)
+	dumpster_tex = _tex(bin)
+	var box := _new(16, 15)
+	_rect(box, 1, 2, 14, 12, Color("#c8a040"))
+	_rect(box, 1, 2, 14, 4, Color("#e4c460"))
+	_rect(box, 1, 6, 14, 1, Color("#7a5c20"))
+	_rect(box, 6, 2, 4, 12, Color("#d04030"))
+	_rect(box, 6, 2, 4, 1, Color("#f08070"))
+	_outline(box)
+	supply_tex = _tex(box)
+	var chute := _new(24, 16)
+	_rect(chute, 3, 1, 18, 3, Color("#f0ece0"))
+	_rect(chute, 1, 4, 22, 3, Color("#d8d0c0"))
+	for x in range(1, 23, 6):
+		_rect(chute, x, 1, 3, 6, Color("#d04030"))
+	for t in 9:
+		_px(chute, 2 + t, 7 + t, Color("#c8c4b8"))
+		_px(chute, 21 - t, 7 + t, Color("#c8c4b8"))
+	chute_tex = _tex(chute)
 
 
 func _tree(variant: int, rng: RandomNumberGenerator) -> Image:
@@ -1008,6 +1049,51 @@ func _build_tiles(rng: RandomNumberGenerator) -> void:
 		_rect(con, 0, 0, 16, 1, Color("#615f58"))
 		_rect(con, 0, 0, 1, 16, Color("#615f58"))
 		tiles["concrete"].append(con)
+	_build_map_tiles()
+
+
+## 停车场和窄巷的地面、楼顶和砖墙。用自己的随机数，不影响其它贴图。
+func _build_map_tiles() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	for tile_set: String in ["asphalt", "asphalt_alt", "cobble", "cobble_alt", "roof", "brick"]:
+		tiles[tile_set] = []
+	for i in 4:
+		tiles["asphalt"].append(_speckle(Color("#44464e"), Color("#3c3e46"), Color("#50525a"), 20, rng))
+		var patch := _speckle(Color("#3e4048"), Color("#363840"), Color("#4a4c54"), 18, rng)
+		# 地面裂缝
+		var cx := rng.randi_range(1, 14)
+		for y in 16:
+			_px(patch, clampi(cx, 0, 15), y, Color("#2c2e34"))
+			cx += rng.randi_range(-1, 1)
+		tiles["asphalt_alt"].append(patch)
+		tiles["cobble"].append(_cobble(Color("#6a645c"), rng))
+		tiles["cobble_alt"].append(_cobble(Color("#56584e"), rng))
+		var roof := _speckle(Color("#2a2833"), Color("#24222c"), Color("#34323e"), 14, rng)
+		if i == 0:
+			_rect(roof, 4, 5, 6, 5, Color("#3c3a46"))
+			_rect(roof, 5, 6, 4, 3, Color("#1e1c26"))
+		tiles["roof"].append(roof)
+		var brick := _speckle(Color("#6e4a3c"), Color("#5e3e32"), Color("#7c5646"), 10, rng)
+		for y in range(3, 16, 4):
+			_rect(brick, 0, y, 16, 1, Color("#4a3028"))
+		if i % 2 == 0:
+			_rect(brick, 5, 4, 6, 7, Color("#1c2230"))
+			_rect(brick, 5, 4, 6, 1, Color("#9a8a70"))
+			if i == 0:
+				_rect(brick, 6, 5, 4, 5, Color("#e8c860"))
+		tiles["brick"].append(brick)
+
+
+func _cobble(base: Color, rng: RandomNumberGenerator) -> Image:
+	var img := _speckle(base, base.darkened(0.1), base.lightened(0.08), 12, rng)
+	var line := base.darkened(0.28)
+	for y in [3, 7, 11, 15]:
+		_rect(img, 0, y, 16, 1, line)
+	for row in 4:
+		for x in range(row % 2 * 2, 16, 4):
+			_rect(img, x, row * 4, 1, 3, line)
+	return img
 
 
 func _speckle(base: Color, dark: Color, light: Color, n: int, rng: RandomNumberGenerator) -> Image:
