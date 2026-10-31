@@ -33,6 +33,7 @@ var _shop_done := false
 var _coroutine_wait := 0.0
 var _arena_done := false
 var _test_bot: Variant = null
+var _kind_kills := {}
 
 
 func _ready() -> void:
@@ -69,6 +70,17 @@ func automated() -> bool:
 	return _mode != ""
 
 
+## 机器人模式下打印 Boss 战的关键事件，用来确认阶段和招式都真的走到了。
+func note(text: String) -> void:
+	if _mode == "bot":
+		print("[bot] ", text)
+
+
+func on_kill(kind: String) -> void:
+	if _mode == "bot":
+		_kind_kills[kind] = int(_kind_kills.get(kind, 0)) + 1
+
+
 func on_title_ready(title: Node) -> void:
 	if (_mode == "bot" or _mode == "flow") and _flow_step == 0 and _game == null:
 		_start_from_title.call_deferred(title)
@@ -88,6 +100,21 @@ func _start_from_title(title: Node) -> void:
 			await _save_shot("39_help")
 		title.help_close.pressed.emit()
 		_check(not title.help_panel.visible, "操作说明可关闭")
+		title._on_bestiary()
+		_check(title.bestiary_panel.visible, "僵尸图鉴可打开")
+		var shown := {}
+		for page: Dictionary in title.bestiary_panel.PAGES:
+			for kind: String in page["kinds"]:
+				shown[kind] = true
+		_check(shown.size() == GameData.ZOMBIES.size(), "图鉴收录全部敌人（%d/%d）" % [shown.size(), GameData.ZOMBIES.size()])
+		for i in title.bestiary_panel.PAGES.size():
+			if _shots_dir != "":
+				await _sec(0.1)
+				await _save_shot("38_bestiary_%d" % i)
+			title.bestiary_panel.turn(1)
+		_check(title.bestiary_panel.page == 0, "图鉴翻页能循环")
+		title.bestiary_panel.close_button.pressed.emit()
+		_check(not title.bestiary_panel.visible, "僵尸图鉴可关闭")
 	title._on_start()
 
 
@@ -110,9 +137,9 @@ func on_game_ready(game: Node) -> void:
 
 func on_shop_open(game: Node) -> void:
 	if _mode == "bot" or _mode == "shots":
-		print("[bot] 波 %d 结束 | 玩家 %d/%d 基地 %d/%d 金币 %d 分数 %d 击杀 %d 炮塔 %d" % [
+		print("[bot] 波 %d 结束 | 玩家 %d/%d 基地 %d/%d 金币 %d 分数 %d 击杀 %d 炮塔 %d 累计时长 %ds" % [
 			game.wave, roundi(game.player.hp), roundi(game.player.max_hp), roundi(game.base.hp), roundi(game.base.max_hp),
-			game.coins, game.score, game.kills, game.turrets.size(),
+			game.coins, game.score, game.kills, game.turrets.size(), int(game.time_alive),
 		])
 		if _mode == "shots":
 			_shots_shop()
@@ -143,6 +170,7 @@ func on_game_over(game: Node) -> void:
 			game.victory, game.wave, game.score, game.kills, game.bullets.shots_hit, game.bullets.shots_fired,
 			int(game.time_alive), game.end_reason,
 		])
+		print("[bot] 各种僵尸击杀 ", _kind_kills)
 		_print_perf()
 		get_tree().quit.call_deferred()
 
@@ -678,6 +706,7 @@ func _arena_reset(g: Variant) -> void:
 		z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
 	g.ordnance.clear_field()
 	g.bullets.clear_hazards()
+	g.hazards.clear()
 	g.player.position = Vector2(25 * 16 + 8, 26 * 16 + 8)
 	g.player.velocity = Vector2.ZERO
 	g.player.hp = g.player.max_hp
@@ -744,6 +773,18 @@ func _flow_arena(g: Variant) -> void:
 	await _arena_nuke(g)
 	await _arena_drops(g)
 	await _arena_keys(g)
+	_arena_wave_table(g)
+	await _arena_stalker(g)
+	await _arena_shielder(g)
+	await _arena_splitter(g)
+	await _arena_summoner(g)
+	await _arena_screamer(g)
+	await _arena_balloon(g)
+	await _arena_boss_phases(g)
+	await _arena_boss_moves(g)
+	await _arena_boss_warnings(g)
+	await _arena_boss_loot(g)
+	await _arena_specials(g)
 	await _arena_reset(g)
 	g.player.switch_weapon("pistol")
 	g.player.bot = null
@@ -1250,6 +1291,592 @@ func _arena_keys(g: Variant) -> void:
 	await _sec(0.05)
 	await _shot("63_hud_items")
 	p.bot = _test_bot
+
+
+# ---------------------------------------------------------------------------
+# 新敌人和 Boss：摆好场景，走真实的开火和结算路径
+# ---------------------------------------------------------------------------
+
+func _arena_wave_table(_g: Variant) -> void:
+	var seen := {}
+	for i in GameData.WAVES.size():
+		var q: Array[String] = GameData.build_spawn_queue(i + 1)
+		for kind: String in q:
+			seen[kind] = mini(int(seen.get(kind, i + 1)), i + 1)
+	_check(GameData.WAVES.size() == GameData.MAX_WAVE, "波次表还是 15 波")
+	_check(GameData.build_spawn_queue(5).has("boss"), "第 5 波是屠夫")
+	_check(GameData.build_spawn_queue(10).has("plague"), "第 10 波是瘟疫母体")
+	_check(GameData.build_spawn_queue(15).has("overlord"), "第 15 波是尸王")
+	for kind: String in ["stalker", "shielder", "splitter", "summoner", "screamer", "balloon"]:
+		_check(seen.has(kind), "波次表里会出现 %s" % kind)
+	for kind: String in GameData.BOSSES.keys():
+		_check(GameData.BOSSES[kind]["phases"].size() >= 2, "%s 至少两个阶段" % kind)
+	var final_phases: int = GameData.BOSSES["overlord"]["phases"].size()
+	_check(final_phases > GameData.BOSSES["boss"]["phases"].size() and final_phases > GameData.BOSSES["plague"]["phases"].size(), "最终 Boss 阶段最多（%d）" % final_phases)
+	for kind: String in GameData.BOSSES["overlord"]["elites"]:
+		_check(int(seen.get(kind, 99)) < 15, "尸王召唤的 %s 在前面的波次出现过" % kind)
+	_check(GameData.wave_special(8) == "acid_rain" and GameData.wave_special(12) == "blackout", "第 8、12 波是特殊波")
+
+
+func _arena_stalker(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var z: Node2D = _arena_spawn(g, "stalker", Vector2(110, 0))
+	await _sec(0.05)
+	_check(z.cloaked() and z.modulate.a < 0.4, "潜伏者远处隐身（透明度 %.2f）" % z.modulate.a)
+	await _shot("70_stalker_hidden")
+	z.position = p.position + Vector2(40, 0)
+	g.god_mode = false
+	p.invuln = 0.0
+	var hp_before: float = p.hp
+	await _sec(0.1)
+	_check(not z.cloaked() and z.modulate.a == 1.0, "潜伏者贴近后现身")
+	_check(z._warn_t > 0.0 and p.hp == hp_before, "现身时先蓄力闪光，还没咬人")
+	await _shot("71_stalker_reveal")
+	await _sec(0.75)
+	_check(p.hp <= hp_before - float(GameData.ZOMBIES["stalker"]["damage"]) * 0.9, "蓄力后猛扑造成高伤（%.0f）" % (hp_before - p.hp))
+	g.god_mode = true
+	p.hp = p.max_hp
+	var other: Node2D = _arena_spawn(g, "stalker", Vector2(150, 0))
+	await _sec(0.05)
+	other.take_damage(1.0, Vector2.RIGHT, 0.0)
+	_check(not other.cloaked() and other.modulate.a == 1.0, "潜伏者被打中会暴露")
+
+
+func _arena_shielder(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var z: Node2D = _arena_spawn(g, "shielder", Vector2(60, 0))
+	await _sec(0.05)
+	var brain: Variant = z._brain
+	brain.face = Vector2.LEFT
+	await _sec(0.05)
+	await _shot("72_shielder")
+	var shield_before: float = brain.shield_hp
+	p.weapon_state["pistol"]["mag"] = 12
+	brain.face = Vector2.LEFT
+	await _hold_fire(g, "pistol", 0.03)
+	await _sec(0.15)
+	_check(z.hp == z.max_hp and brain.shield_hp < shield_before, "正面子弹被盾挡下，只磨耐久（%.0f -> %.0f）" % [shield_before, brain.shield_hp])
+	# 绕后：盾朝反方向，同一把枪就能打到
+	brain.face = Vector2.RIGHT
+	p.cooldown = 0.0
+	await _hold_fire(g, "pistol", 0.03)
+	await _sec(0.15)
+	_check(z.hp < z.max_hp, "绕到背后能打穿")
+	brain.face = Vector2.RIGHT
+	_check(not brain.blocks(z, Vector2.RIGHT) and brain.blocks(z, Vector2.LEFT), "盾只挡正面")
+	# 克制手段：爆炸、火焰、电弧、眩晕，都在盾朝向玩家时生效
+	await _arena_reset(g)
+	var blast: Node2D = _arena_spawn(g, "shielder", Vector2(100, 0))
+	await _sec(0.05)
+	blast._brain.face = Vector2.LEFT
+	var blast_shield: float = blast._brain.shield_hp
+	g.explode(blast.center() + Vector2(-20, 0), 10.0, 30.0, true, true)
+	_check(blast.hp < blast.max_hp and blast._brain.shield_hp < blast_shield, "爆炸无视盾牌还削盾")
+	await _arena_reset(g)
+	var fire: Node2D = _arena_spawn(g, "shielder", Vector2(40, 0))
+	await _sec(0.05)
+	fire._brain.face = Vector2.LEFT
+	await _hold_fire(g, "flamer", 0.3)
+	_check(fire.hp < fire.max_hp, "火焰无视盾牌")
+	await _arena_reset(g)
+	var shock: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
+	await _sec(0.05)
+	shock._brain.face = Vector2.LEFT
+	await _hold_fire(g, "arc", 0.03)
+	_check(shock.hp < shock.max_hp, "电弧无视盾牌")
+	await _arena_reset(g)
+	var stunned: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
+	await _sec(0.05)
+	stunned._brain.face = Vector2.LEFT
+	stunned.stun(1.0)
+	_check(not stunned.blocks_shot(Vector2.RIGHT), "被眩晕时盾放下了")
+	# 冻住同样打断精英的蓄力
+	await _arena_reset(g)
+	var chanter: Node2D = _arena_spawn(g, "screamer", Vector2(90, 0))
+	await _sec(0.02)
+	chanter._brain._cd = 0.0
+	await _sec(0.1)
+	var warned: bool = chanter._brain._warn >= 0.0
+	chanter.apply_chill(5.0)
+	_check(warned and chanter._brain._warn < 0.0 and chanter._frozen_t > 0.0, "冻住打断尖叫蓄力")
+	await _arena_reset(g)
+	var ghoul: Node2D = _arena_spawn(g, "stalker", Vector2(40, 0))
+	await _sec(0.1)
+	var pose_set: bool = ghoul._pose >= 0
+	ghoul.stun(0.5)
+	_check(pose_set and ghoul._pose == -1, "眩晕打断潜伏者的蓄力动作")
+	# 盾有耐久，打碎后不再挡，不会卡住波次
+	await _arena_reset(g)
+	var worn: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
+	await _sec(0.05)
+	worn._brain.face = Vector2.LEFT
+	worn.shield_hit(99999.0)
+	_check(not worn._brain.up and not worn.blocks_shot(Vector2.RIGHT), "盾耐久打完会碎")
+
+
+func _count_kind(g: Variant, kind: String) -> int:
+	var n := 0
+	for z: Variant in g.zombies:
+		if z.kind == kind:
+			n += 1
+	return n
+
+
+func _arena_splitter(g: Variant) -> void:
+	await _arena_reset(g)
+	var z: Node2D = _arena_spawn(g, "splitter", Vector2(100, 0))
+	await _sec(0.05)
+	await _shot("73_splitter")
+	z.take_damage(z.max_hp + 1.0, Vector2.RIGHT, 0.0)
+	var kids: int = _count_kind(g, "splitling")
+	_check(kids >= 2 and kids <= 3, "分裂体死后裂成 2~3 只小怪（%d）" % kids)
+	await _sec(0.1)
+	await _shot("74_splitlings")
+	var moved := true
+	for k: Variant in g.zombies:
+		if k.kind == "splitling" and g.map.blocks(g.map.cell_of(k.position), g.map.BLOCK_ZOMBIE):
+			moved = false
+	_check(moved, "分裂小怪不会卡进障碍")
+	await _arena_reset(g)
+	_check(_count_kind(g, "splitling") == 0, "脚本清场不分裂")
+	var nuked: Node2D = _arena_spawn(g, "splitter", Vector2(100, 0))
+	nuked.no_blast = true
+	nuked.take_damage(nuked.max_hp + 1.0, Vector2.RIGHT, 0.0)
+	_check(_count_kind(g, "splitling") == 0, "核弹清掉的分裂体不分裂")
+
+
+func _arena_summoner(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var z: Node2D = _arena_spawn(g, "summoner", Vector2(170, 0))
+	await _sec(0.05)
+	z._brain._cd = 0.0
+	await _sec(0.1)
+	_check(z._brain._cast_t > 0.0 and z._warn_t > 0.0, "召唤者吟唱时有闪光提示")
+	await _shot("75_summoner_cast")
+	await _sec(1.2)
+	var circles := 0
+	for zone: Variant in g.hazards.zones:
+		if zone.kind == "spawn":
+			circles += 1
+	_check(circles == 2, "吟唱结束先亮紫圈（%d）" % circles)
+	await _shot("76_summon_circle")
+	await _sec(0.8)
+	var imps := 0
+	var close_to_player := true
+	for k: Variant in g.zombies:
+		if k.kind == "imp":
+			imps += 1
+			if k.master != z:
+				close_to_player = false
+			elif k.position.distance_to(p.position) > 90.0:
+				close_to_player = false
+	_check(imps == 2, "紫圈里钻出小鬼（%d）" % imps)
+	_check(close_to_player, "小鬼出现在玩家身边，不在召唤者身边")
+	var kills: int = g.kills
+	z.take_damage(z.max_hp + 1.0, Vector2.RIGHT, 0.0)
+	_check(_count_kind(g, "imp") == 0, "召唤者死后小鬼一起散")
+	_check(g.kills == kills + 1, "散掉的小鬼不算击杀")
+	# 贴太近会后退，不站着挨打
+	await _arena_reset(g)
+	var shy: Node2D = _arena_spawn(g, "summoner", Vector2(50, 0))
+	await _sec(0.05)
+	shy._brain._cd = 99.0
+	var d0: float = shy.position.distance_to(p.position)
+	await _sec(0.5)
+	_check(shy.position.distance_to(p.position) > d0 + 2.0, "召唤者会和玩家保持距离")
+
+
+func _arena_screamer(g: Variant) -> void:
+	await _arena_reset(g)
+	var z: Node2D = _arena_spawn(g, "screamer", Vector2(90, 0))
+	var near: Node2D = _arena_spawn(g, "walker", Vector2(120, 16))
+	var far: Node2D = _arena_spawn(g, "walker", Vector2(0, 0))
+	far.position = Vector2(4, 4) * 16.0
+	far.stun(5.0)
+	await _sec(0.05)
+	z._brain._cd = 0.0
+	await _sec(0.1)
+	_check(z._warn_t > 0.0, "尖叫前有蓄力闪光")
+	await _shot("77_screamer_warn")
+	await _sec(1.0)
+	_check(z._brain.screams == 1, "尖叫者叫了一声")
+	_check(near.rallied() and not far.rallied(), "只有附近的僵尸被鼓动")
+	await _shot("78_screamer_rally")
+	var from: Vector2 = near.position
+	await _sec(0.5)
+	var rally_speed: float = near.position.distance_to(from) / 0.5
+	_check(rally_speed > near._speed * 1.2, "被鼓动的僵尸明显加速（%.0f > %.0f）" % [rally_speed, near._speed])
+
+
+func _arena_balloon(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var wall_cell := -1
+	for piece: Variant in g.map.pieces:
+		if piece.kind == "wall" and piece.alive:
+			wall_cell = piece.cell
+			break
+	var z: Node2D = _arena_spawn(g, "balloon", Vector2(100, 0))
+	await _sec(0.05)
+	await _shot("79_balloon")
+	z.position = g.map.cell_center(wall_cell)
+	_check(z.flying, "气球僵尸会飞")
+	var start: Vector2 = z.position
+	await _sec(0.5)
+	_check(z.position.distance_to(start) > 5.0, "气球僵尸能从围墙上飘走（%.0f）" % z.position.distance_to(start))
+	z.position = p.position + Vector2(10, 0)
+	z._brain._drop_cd = 0.0
+	await _sec(0.05)
+	var bombs := 0
+	for zone: Variant in g.hazards.zones:
+		if zone.kind == "bomb":
+			bombs += 1
+	_check(bombs >= 1, "气球僵尸到头顶投弹，先亮红圈")
+	await _shot("80_balloon_bomb")
+	g.god_mode = false
+	p.invuln = 0.0
+	var hp_before: float = p.hp
+	await _sec(1.0)
+	_check(p.hp < hp_before, "毒弹落地炸到玩家")
+	g.god_mode = true
+	p.hp = p.max_hp
+	# 打爆气球：摔下一只半血僵尸，落点不在墙里
+	z.position = g.map.cell_center(wall_cell)
+	var walkers: int = _count_kind(g, "walker")
+	z.take_damage(z.max_hp + 1.0, Vector2.RIGHT, 0.0)
+	_check(_count_kind(g, "walker") == walkers + 1, "打爆气球摔下一只僵尸")
+	var fallen: Node2D = g.zombies[g.zombies.size() - 1]
+	_check(fallen.hp == fallen.max_hp * 0.5, "摔下来的僵尸只剩半血")
+	g.hazards.clear()
+	z = _arena_spawn(g, "balloon", Vector2(100, 0))
+	await _sec(0.02)
+	z._brain._drop_cd = 0.0
+	z.position = p.position + Vector2(10, 0)
+	await _sec(0.05)
+	var falling: int = g.hazards.zones.size()
+	z.take_damage(z.max_hp + 1.0, Vector2.RIGHT, 0.0)
+	_check(falling >= 1 and g.hazards.zones.size() == falling, "气球被打爆后半空的毒弹继续落下")
+	_check(not g.map.blocks(g.map.cell_of(fallen.position), g.map.BLOCK_ZOMBIE), "摔下来不会卡在墙里")
+
+
+## 用真实的伤害入口把血打到阈值，确认换阶段、锁血、无敌窗口。
+func _arena_boss_phases(g: Variant) -> void:
+	for kind: String in GameData.BOSSES.keys():
+		await _arena_reset(g)
+		var z: Node2D = _arena_spawn(g, kind, Vector2(110, 0))
+		await _sec(0.05)
+		var brain: Variant = z._brain
+		var phases: Array = GameData.BOSSES[kind]["phases"]
+		_check(g.boss_list.has(z) and brain.phase == 0, "%s 进入 Boss 列表，从第一阶段开始" % kind)
+		_check(z.boss_info()["count"] == phases.size(), "%s 的血条信息正确" % kind)
+		await _shot("81_%s_bar" % kind)
+		brain._gap = 999.0
+		for i in range(1, phases.size()):
+			var moves_before: Array = phases[i - 1]["moves"]
+			var limit: float = float(phases[i]["at"]) * z.max_hp
+			z.take_damage(z.max_hp * 5.0, Vector2.RIGHT, 0.0, false)
+			_check(not z.dead and absf(z.hp - limit) < 1.0, "%s 一刀打不穿阶段，血量锁在 %d%%" % [kind, roundi(float(phases[i]["at"]) * 100.0)])
+			_check(brain.phase == i and z.boss_info()["name"] == phases[i]["name"], "%s 切到第 %d 阶段" % [kind, i + 1])
+			_check(brain.untouchable() and z._warn_t > 0.0, "%s 换阶段时闪光且无敌" % kind)
+			_check(phases[i]["moves"] != moves_before, "%s 第 %d 阶段换了招式" % [kind, i + 1])
+			var hp_locked: float = z.hp
+			z.take_damage(z.max_hp, Vector2.RIGHT, 0.0, false)
+			_check(z.hp == hp_locked, "%s 换阶段的无敌窗口打不动" % kind)
+			await _shot("82_%s_phase%d" % [kind, i + 1])
+			# 等过场结束，进阶段招式放完，清掉召唤物再打下一段
+			await _sec(brain.CHANGE_T + 0.1)
+			_check(not brain.untouchable(), "%s 过场结束恢复可打" % kind)
+			brain._gap = 999.0
+			await _wait_move(brain)
+			brain.shield = 0.0
+			g.dismiss_minions(z)
+		# 最后阶段没有阈值，打穿就死
+		z.take_damage(z.max_hp * 5.0, Vector2.RIGHT, 0.0, false)
+		_check(z.dead and not g.boss_list.has(z), "%s 最后阶段能被击败" % kind)
+		g._boss_hold_t = 0.0
+		g._queue = ["walker"] as Array[String]
+		g.state = g.State.COMBAT
+
+
+func _wait_move(brain: Variant) -> void:
+	for i in 40:
+		if brain._act == "":
+			return
+		await _sec(0.05)
+
+
+## 每个阶段的每个招式都实际放一遍，校验各自的效果。
+func _arena_boss_moves(g: Variant) -> void:
+	var used := {}
+	for kind: String in GameData.BOSSES.keys():
+		var phases: Array = GameData.BOSSES[kind]["phases"]
+		for i in phases.size():
+			for move: String in phases[i]["moves"]:
+				var tag := "%s/%d/%s" % [kind, i + 1, move]
+				await _arena_reset(g)
+				var z: Node2D = _arena_spawn(g, kind, Vector2(70, 0))
+				await _sec(0.02)
+				var brain: Variant = z._brain
+				brain.phase = i
+				brain._apply_phase(z)
+				brain._gap = 999.0
+				await _try_move(g, z, brain, move, tag)
+				used[move] = true
+	var expected := ["charge", "charge2", "slam", "rocks", "storm", "fog", "fogring", "fan", "wave", "call", "elites", "shield", "scream"]
+	for move: String in expected:
+		_check(used.has(move), "招式 %s 被覆盖" % move)
+
+
+func _try_move(g: Variant, z: Variant, brain: Variant, move: String, tag: String) -> void:
+	brain._begin_move(z, move)
+	_check(z._warn_t > 0.0, "%s 起手有蓄力闪光" % tag)
+	match move:
+		"charge", "charge2":
+			_check(g.hazards.lanes.size() == 1, "%s 地上亮冲撞通道" % tag)
+			await _shot("83_charge_lane")
+			await _sec(brain.CHARGE_WARN + 0.05)
+			_check(z._charge_t > 0.0 or z.position.distance_to(g.player.position) < 60.0, "%s 蓄力后才冲出去" % tag)
+		"slam":
+			_check(g.hazards.zones.size() == 1 and g.hazards.zones[0].kind == "slam", "%s 脚下亮红圈" % tag)
+			await _shot("84_slam_circle")
+			await _sec(1.0)
+			_check(g.hazards.zones.is_empty(), "%s 红圈结算" % tag)
+		"rocks", "storm":
+			await _sec(0.75)
+			var rocks := 0
+			for zone: Variant in g.hazards.zones:
+				if zone.kind == "rock":
+					rocks += 1
+			_check(rocks >= 3, "%s 落点全部亮圈（%d）" % [tag, rocks])
+			await _shot("85_rock_circles")
+		"fog", "fogring":
+			await _sec(0.7)
+			var fogs := 0
+			for zone: Variant in g.hazards.zones:
+				if zone.kind == "fog":
+					fogs += 1
+			_check(fogs >= 2, "%s 毒雾落下前有预警圈（%d）" % [tag, fogs])
+			await _sec(1.0)
+			_check(g.hazards.clouds.size() >= 2, "%s 毒雾留在地上" % tag)
+			await _shot("86_fog")
+		"fan":
+			await _sec(0.65)
+			_check(g.bullets.spits.size() == 5, "%s 扇形喷出 5 发毒液" % tag)
+		"wave":
+			_check(not g.hazards.zones.is_empty(), "%s 起手有预警圈" % tag)
+			await _sec(0.95)
+			_check(g.hazards.shocks.size() == 1, "%s 放出冲击波" % tag)
+			await _shot("87_shockwave")
+		"call":
+			var before: int = g.zombies.size()
+			await _sec(0.85)
+			_check(not g.hazards.zones.is_empty(), "%s 召唤前亮紫圈" % tag)
+			await _sec(0.9)
+			_check(g.zombies.size() > before, "%s 叫来了小怪" % tag)
+			await _shot("88_call")
+		"elites":
+			await _sec(2.0)
+			var pool: Array = GameData.BOSSES[z.kind].get("elites", [])
+			var ok := true
+			var n := 0
+			for other: Variant in g.zombies:
+				if other.master == z:
+					n += 1
+					ok = ok and pool.has(other.kind)
+			_check(n == 3 and ok, "%s 召来前面出现过的精英（%d）" % [tag, n])
+			var guard: Variant = brain.phases[brain.phase].get("guard", null)
+			if guard != null:
+				await _sec(0.05)
+				_check(brain.guarded(), "%s 精英活着时本体减伤" % tag)
+				var before: float = z.hp
+				z.take_damage(20.0, Vector2.RIGHT, 0.0, false)
+				_check(before - z.hp < 20.0 * float(guard) + 1.0 and before > z.hp, "%s 减伤数值生效" % tag)
+				g.dismiss_minions(z)
+				await _sec(0.05)
+				_check(not brain.guarded(), "%s 精英清完减伤消失" % tag)
+			await _shot("89_elites")
+		"shield":
+			await _sec(0.75)
+			_check(brain.shield > 0.0, "%s 张开护盾" % tag)
+			var before: float = z.hp
+			z.take_damage(10.0, Vector2.RIGHT, 0.0, false)
+			_check(z.hp == before and brain.shield < brain.shield_max, "%s 护盾先吃伤害" % tag)
+			await _shot("90_shield")
+			z.take_damage(brain.shield + 5.0, Vector2.RIGHT, 0.0, false)
+			_check(brain.shield <= 0.0 and z.hp < before, "%s 护盾打破后伤害溢出到本体" % tag)
+		"scream":
+			var minion: Node2D = _arena_spawn(g, "walker", Vector2(100, 20))
+			await _sec(0.95)
+			_check(minion.rallied(), "%s 全场尖叫鼓动僵尸" % tag)
+
+
+## 危险提示的意义：蓄力期间不掉血、站在圈外不掉血、站在圈内才掉血，晕眩能打断。
+func _arena_boss_warnings(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var z: Node2D = _arena_spawn(g, "boss", Vector2(30, 0))
+	await _sec(0.02)
+	var brain: Variant = z._brain
+	brain._gap = 999.0
+	z._attack_t = 99.0
+	g.god_mode = false
+	p.invuln = 0.0
+	var hp0: float = p.hp
+	brain._begin_move(z, "slam")
+	await _sec(0.5)
+	_check(p.hp == hp0, "重砸蓄力期间不掉血")
+	await _sec(0.5)
+	_check(p.hp < hp0, "站在红圈里挨砸（%.0f）" % (hp0 - p.hp))
+	p.hp = p.max_hp
+	# 站在圈外毫发无损
+	await _sec(0.6)
+	p.invuln = 0.0
+	hp0 = p.hp
+	g.hazards.slam(p.position + Vector2(90, 0), 40.0, 30.0, 0.2, z)
+	g.hazards.rock(p.position + Vector2(90, 30), 30.0, 0.2)
+	await _sec(0.35)
+	_check(p.hp == hp0, "站在红圈外不受伤")
+	# 落石
+	g.hazards.rock(p.position, 12.0, 0.2)
+	await _sec(0.3)
+	_check(p.hp < hp0, "站在落石圈里被砸")
+	p.hp = p.max_hp
+	# 毒雾和血清
+	g.hazards.clear()
+	await _sec(0.6)
+	hp0 = p.hp
+	g.hazards.fog(p.position, 30.0, 3.0, null)
+	await _sec(0.5)
+	_check(p.hp == hp0, "毒雾预警期间不掉血")
+	await _sec(1.0)
+	var fog_loss: float = hp0 - p.hp
+	_check(fog_loss > 0.5, "毒雾持续掉血（%.1f）" % fog_loss)
+	g.hazards.clear()
+	p.hp = p.max_hp
+	# 冲击波：冲刺的无敌帧能穿过去
+	p.invuln = 0.0
+	hp0 = p.hp
+	g.hazards.shockwave(p.position + Vector2(40, 0), 120.0, 300.0, 15.0)
+	await _sec(0.25)
+	_check(p.hp < hp0, "冲击波扫到会掉血")
+	p.hp = p.max_hp
+	p.invuln = 0.0
+	hp0 = p.hp
+	p.dash_t = 0.3
+	g.hazards.shockwave(p.position + Vector2(10, 0), 40.0, 300.0, 15.0)
+	await _sec(0.1)
+	_check(p.hp == hp0, "冲刺能穿过冲击波")
+	p.dash_t = 0.0
+	g.god_mode = true
+	p.hp = p.max_hp
+	g.hazards.clear()
+	# 晕眩打断蓄力，Boss 的冲锋也停
+	brain._begin_move(z, "charge")
+	_check(brain._act == "charge", "开始蓄力冲撞")
+	z.stun(0.2)
+	_check(brain._act == "", "晕眩打断蓄力")
+	await _sec(0.3)
+	# 施法者死了，没落地的招式作废
+	brain._gap = 999.0
+	brain._begin_move(z, "slam")
+	z.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	_check(g.hazards.zones.is_empty(), "Boss 死后没落地的招式作废")
+
+
+func _arena_boss_loot(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	g.pickups.enabled = true
+	g.pickups.items.clear()
+	# 屠夫：金币、必掉道具、专属战利品
+	var z: Node2D = _arena_spawn(g, "boss", Vector2(150, 0))
+	await _sec(0.02)
+	z._brain.phase = z._brain.phases.size() - 1
+	var minion: Node2D = _arena_spawn(g, "imp", Vector2(170, 10))
+	minion.master = z
+	z.take_damage(z.max_hp * 5.0, Vector2.RIGHT, 0.0)
+	var spec: Dictionary = GameData.BOSSES["boss"]
+	var counts := {}
+	var coin_total := 0
+	for it: Variant in g.pickups.items:
+		counts[it.kind] = int(counts.get(it.kind, 0)) + 1
+		if it.kind == "coin":
+			coin_total += it.value
+	_check(coin_total == int(GameData.ZOMBIES["boss"]["coins"]), "Boss 掉金币雨（%d）" % coin_total)
+	_check(int(counts.get("item", 0)) == spec["drops"].size(), "Boss 必掉 %d 件道具" % spec["drops"].size())
+	_check(int(counts.get("trophy", 0)) == 1 and int(counts.get("med", 0)) == 1, "Boss 掉专属战利品和急救包")
+	_check(_gone(minion), "Boss 死后召唤物一起散")
+	_check(g._boss_hold_t > 0.0 and g.state == g.State.COMBAT, "击败后留出捡战利品的时间")
+	await _shot("91_boss_loot")
+	g.pickups.items.clear()
+	# 战利品效果
+	var max_before: float = p.max_hp
+	p.hp = 10.0
+	g.pickups.drop(p.position, "trophy", 1, "heart")
+	await _sec(1.2)
+	_check(p.max_hp == max_before + GameData.TROPHY_HP and p.hp == p.max_hp, "屠夫之心加生命上限并回满")
+	g.pickups.drop(p.position, "trophy", 1, "serum")
+	await _sec(1.2)
+	_check(p.dot_mult == GameData.TROPHY_DOT, "母体血清减半持续伤害")
+	var score_before: int = g.score
+	g.pickups.drop(p.position, "trophy", 1, "crown")
+	await _sec(1.2)
+	_check(g.score == score_before + GameData.TROPHY_SCORE, "尸王之冠加分")
+	p.dot_mult = 1.0
+	# 通关瞬间地上的战利品也要算数
+	score_before = g.score
+	g.pickups.drop(p.position + Vector2(400, 0), "trophy", 1, "crown")
+	g.pickups.collect_all()
+	_check(g.score == score_before + GameData.TROPHY_SCORE and g.pickups.items.is_empty(), "通关时地上的战利品自动结算")
+	g.pickups.enabled = false
+	# 尸王倒下：场上和队列里的僵尸全部散掉
+	await _arena_reset(g)
+	g._queue = ["walker", "walker"] as Array[String]
+	var king: Node2D = _arena_spawn(g, "overlord", Vector2(150, 0))
+	var a: Node2D = _arena_spawn(g, "walker", Vector2(80, 0))
+	var b: Node2D = _arena_spawn(g, "tank", Vector2(100, 20))
+	await _sec(0.02)
+	king._brain.phase = king._brain.phases.size() - 1
+	king.take_damage(king.max_hp * 5.0, Vector2.RIGHT, 0.0)
+	_check(king.dead and _gone(a) and _gone(b), "尸王倒下全场僵尸一起死")
+	_check(g._queue.is_empty(), "尸王倒下清空剩余出怪")
+	g._queue = ["walker"] as Array[String]
+	g._boss_hold_t = 0.0
+
+
+func _arena_specials(g: Variant) -> void:
+	await _arena_reset(g)
+	var wave_before: int = g.wave
+	g.wave = 8
+	g._acid_t = 0.0
+	await _sec(0.05)
+	var drops := 0
+	for zone: Variant in g.hazards.zones:
+		if zone.kind == "acid":
+			drops += 1
+	_check(drops == GameData.ACID_RAIN_COUNT, "第 8 波下酸雨，落点先亮圈（%d）" % drops)
+	await _shot("92_acid_rain")
+	g.god_mode = false
+	g.player.invuln = 0.0
+	g.hazards.clear()
+	var hp0: float = g.player.hp
+	g.hazards.acid(g.player.position, 10.0)
+	await _sec(1.2)
+	_check(g.player.hp < hp0, "酸雨落地伤害玩家")
+	g.god_mode = true
+	g.player.hp = g.player.max_hp
+	g.wave = 12
+	var dark: Color = g._combat_tint()
+	g.wave = 11
+	var normal: Color = g._combat_tint()
+	_check(dark.r < normal.r and dark.b <= normal.b, "第 12 波断电比普通夜晚更暗")
+	g.wave = wave_before
+	g._acid_t = 99999.0
+	g.hazards.clear()
+	g.bullets.clear_hazards()
 
 
 func _flow_explosion_test(g: Variant) -> void:

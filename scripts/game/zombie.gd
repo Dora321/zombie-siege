@@ -2,6 +2,11 @@ extends Node2D
 ## 僵尸：顺着流场走向基地，近距离看见玩家就扑过去，被建筑挡住就啃。
 
 const BOX_R := 5.0
+## 超过这个数值的伤害只来自脚本清场：无视阶段和护盾，也不分裂、不掉战利品。
+const KILL_DAMAGE := 90000.0
+const RALLY_SPEED := 1.5
+const Elites := preload("res://scripts/game/elite_brains.gd")
+const BossBrain := preload("res://scripts/game/boss_brain.gd")
 
 var game: Node
 var map: Node2D
@@ -13,6 +18,16 @@ var hit_r := 6.0
 var center_h := 7.0
 ## 核弹清场时置位，死后不再二次爆炸。
 var no_blast := false
+var is_boss := false
+var flying := false
+## 飞行高度，只影响身体贴图的位置。
+var lift := 0.0
+## 站着不动也播放动画的速度，比如吟唱和气球摇晃。
+var idle_anim := 0.0
+## 召唤它的那只僵尸，主人死了它也散。
+var master: Variant = null
+var overkill := false
+var dismissed := false
 
 var _speed := 30.0
 var _damage := 5.0
@@ -40,8 +55,16 @@ var _recenter_t := 0.0
 
 # 自爆僵尸
 var _fuse := -1.0
+# 特殊行为，普通僵尸为 null
+var _brain: Variant = null
+var _speed_mult := 1.0
+# 被尖叫者鼓动：加速并直奔玩家
+var _rally_t := 0.0
+# 蓄力闪光和固定动作帧
+var _warn_t := 0.0
+var _pose := -1
+var _tint := Color.WHITE
 # Boss 冲锋
-var _charge_cd := 6.0
 var _charge_t := 0.0
 var _charge_dir := Vector2.ZERO
 # 喷吐僵尸的蓄力
@@ -82,17 +105,43 @@ func setup(g: Node, m: Node2D, zombie_kind: String, pos: Vector2, wave: int) -> 
 	_phase = randi() % 64
 	_think_t = randf() * 0.2
 	_attack_t = randf() * 0.4
+	is_boss = bool(_stat.get("is_boss", false))
+	flying = bool(_stat.get("flying", false))
 	var size := Art.char_size(kind)
 	body.offset = Vector2(-size.x / 2, -size.y + 1)
-	match kind:
-		"tank":
-			shadow.texture = Art.shadow_medium
-		"boss":
-			shadow.texture = Art.shadow_big
-		_:
-			shadow.texture = Art.shadow_small
+	# 叠加层（护盾、蓄力光圈）要盖在身体上
+	body.show_behind_parent = true
+	shadow.show_behind_parent = true
+	if is_boss:
+		shadow.texture = Art.shadow_big
+	elif kind == "tank":
+		shadow.texture = Art.shadow_medium
+	else:
+		shadow.texture = Art.shadow_small
 	shadow.position = Vector2(0, -1)
+	_brain = _make_brain()
+	if _brain != null:
+		_brain.setup(self)
 	_apply_frame()
+
+
+func _make_brain() -> Variant:
+	if is_boss:
+		return BossBrain.new()
+	match kind:
+		"stalker":
+			return Elites.Stalker.new()
+		"shielder":
+			return Elites.Shielder.new()
+		"splitter":
+			return Elites.Splitter.new()
+		"summoner":
+			return Elites.Summoner.new()
+		"screamer":
+			return Elites.Screamer.new()
+		"balloon":
+			return Elites.Balloon.new()
+	return null
 
 
 func center() -> Vector2:
@@ -106,13 +155,15 @@ func _physics_process(dt: float) -> void:
 	_flash_t -= dt
 	_stagger_t -= dt
 	_think_t -= dt
+	_warn_t -= dt
+	_rally_t -= dt
 	_lunge = _lunge.lerp(Vector2.ZERO, clampf(16.0 * dt, 0.0, 1.0))
 	_tick_status(dt)
 	if dead:
 		return
 	if _frozen_t > 0.0 or _stun_t > 0.0:
 		# 冻住和眩晕时站着不动，只吃击退
-		position = map.move_box(position, _knock * dt, BOX_R, map.BLOCK_ZOMBIE)
+		_move_by(_knock * dt)
 		_knock = _knock.lerp(Vector2.ZERO, clampf(9.0 * dt, 0.0, 1.0))
 		_animate(dt, Vector2.ZERO, 0.0)
 		return
@@ -123,25 +174,87 @@ func _physics_process(dt: float) -> void:
 		_update_separation()
 
 	var move_dir := _decide(dt)
-	var spd := _speed
+	var spd := _speed * _speed_mult
+	if _rally_t > 0.0:
+		spd *= RALLY_SPEED
 	if _stagger_t > 0.0:
 		spd *= 0.45
 	if _chill_t > 0.0:
-		spd *= GameData.CHILL_SLOW_BOSS if kind == "boss" else GameData.CHILL_SLOW
+		spd *= GameData.CHILL_SLOW_BOSS if is_boss else GameData.CHILL_SLOW
 	if _charge_t > 0.0:
-		spd = _speed * 4.2
+		spd = charge_speed()
 	var motion: Vector2 = move_dir * spd + _sep * 34.0 + _knock
 	var before := position
-	position = map.move_box(position, motion * dt, BOX_R, map.BLOCK_ZOMBIE)
+	_move_by(motion * dt)
 	_knock = _knock.lerp(Vector2.ZERO, clampf(9.0 * dt, 0.0, 1.0))
 	var moved := (position - before).length()
-	_check_stuck(dt, move_dir, moved, spd)
+	if not flying:
+		_check_stuck(dt, move_dir, moved, spd)
 	_animate(dt, move_dir, moved)
+	if _brain != null and _brain.redraw:
+		queue_redraw()
 
 	if _fuse >= 0.0:
 		_fuse -= dt
 		if _fuse < 0.0:
 			_explode_now()
+
+
+## 飞行的僵尸无视地形，只被地图边界挡住。
+func _move_by(d: Vector2) -> void:
+	if flying:
+		position = (position + d).clamp(Vector2(8, 8), Vector2(map.PIXEL_W - 8, map.PIXEL_H - 8))
+	else:
+		position = map.move_box(position, d, BOX_R, map.BLOCK_ZOMBIE)
+
+
+func charge_speed() -> float:
+	return _speed * 4.2
+
+
+func incapacitated() -> bool:
+	return _frozen_t > 0.0 or _stun_t > 0.0
+
+
+func cloaked() -> bool:
+	return _brain != null and _brain.cloaked()
+
+
+func blocks_shot(dir: Vector2) -> bool:
+	return _brain != null and _brain.blocks(self, dir)
+
+
+func shield_hit(amount: float) -> void:
+	if _brain != null:
+		_brain.shield_hit(self, amount)
+
+
+func flash_warn(seconds: float) -> void:
+	_warn_t = seconds
+
+
+func set_tint(c: Color) -> void:
+	_tint = c
+	if _status_key == 0 and body != null:
+		body.modulate = c
+
+
+## 被尖叫鼓动：一段时间内加速，只要看得见就直奔玩家。
+func rally(seconds: float) -> void:
+	if dead:
+		return
+	_rally_t = maxf(_rally_t, seconds)
+	_think_t = 0.0
+	queue_redraw()
+
+
+func rallied() -> bool:
+	return _rally_t > 0.0
+
+
+## 给 HUD 用的 Boss 信息。
+func boss_info() -> Dictionary:
+	return _brain.info()
 
 
 ## 防软锁：连续走不动时先回到格子中心重走，还不行就直接挪到下一格。
@@ -176,6 +289,8 @@ func _think() -> void:
 		var d: float = position.distance_to(player.position)
 		if d < _aggro and map.line_clear(position, player.position, map.BLOCK_ZOMBIE):
 			_chasing = true
+		elif _rally_t > 0.0 and map.line_clear(position, player.position, map.BLOCK_ZOMBIE):
+			_chasing = true
 
 
 func _update_separation() -> void:
@@ -209,21 +324,10 @@ func _decide(dt: float) -> Vector2:
 			_lunge = (_spit_target - position).normalized() * 3.0
 		return Vector2.ZERO
 
-	if kind == "boss":
-		_charge_cd -= dt
-		if _charge_t > 0.0:
-			_charge_t -= dt
-			if _charge_t <= 0.0 or _charge_impact(player_ok):
-				_end_charge()
-				return Vector2.ZERO
-			return _charge_dir
-		if _charge_cd <= 0.0 and player_ok and position.distance_to(player.position) < 220.0:
-			_charge_t = 1.1
-			_charge_dir = position.direction_to(player.position)
-			Sfx.play("boss_roar", -1.0)
-			game.add_shake(0.5)
-			game.fx.dust(position, 10)
-			return _charge_dir
+	if _brain != null:
+		var forced: Variant = _brain.decide(self, dt, player_ok)
+		if forced != null:
+			return forced
 
 	# 贴身打玩家
 	if player_ok:
@@ -309,7 +413,6 @@ func _charge_impact(player_ok: bool) -> bool:
 
 func _end_charge() -> void:
 	_charge_t = 0.0
-	_charge_cd = randf_range(6.0, 9.0)
 	_attack_t = 0.6
 
 
@@ -333,16 +436,19 @@ func _pick_spit_target(player_ok: bool) -> Variant:
 func _attack_player(player: Variant) -> void:
 	_attack_t = _attack_cd
 	_lunge = position.direction_to(player.position) * 5.0
-	player.take_damage(_damage, position)
+	player.take_damage(_damage * float(_stat.get("melee", 1.0)), position)
 
 
 func _attack_structure(s: Variant, cell: int) -> void:
 	_attack_t = _attack_cd
 	_lunge = position.direction_to(map.cell_center(cell)) * 4.0
-	var mult := 1.0
-	if (kind == "tank" or kind == "boss") and s.kind != "base":
+	var mult := float(_stat.get("melee", 1.0))
+	if (kind == "tank" or is_boss) and s.kind != "base":
 		mult = 2.0
 	s.take_damage(_damage * mult, self)
+	# 动手啃东西就藏不住了
+	if _brain != null:
+		_brain.on_hit(self)
 	if randf() < 0.07:
 		Sfx.play("groan", -14.0, 0.2)
 
@@ -378,11 +484,13 @@ func apply_chill(amount: float) -> void:
 	_burn_t = 0.0
 	_chill_t = GameData.CHILL_TIME
 	_chill += amount
-	if _chill >= 1.0 and kind != "boss" and _frozen_t <= 0.0:
+	if _chill >= 1.0 and not is_boss and _frozen_t <= 0.0:
 		_chill = 0.0
 		_frozen_t = GameData.FREEZE_TIME * (0.5 if kind == "tank" else 1.0)
 		_fuse = -1.0
 		_windup = -1.0
+		if _brain != null:
+			_brain.on_stun(self)
 		game.fx.frost(center())
 		Sfx.play("cryo", 0.0, 0.2)
 
@@ -394,6 +502,8 @@ func stun(seconds: float) -> void:
 	_windup = -1.0
 	if _charge_t > 0.0:
 		_end_charge()
+	if _brain != null:
+		_brain.on_stun(self)
 
 
 func ignite(seconds: float) -> void:
@@ -410,6 +520,8 @@ func take_tick(amount: float) -> void:
 	if dead:
 		return
 	var dealt := amount * vulnerability()
+	if _brain != null:
+		dealt = _brain.absorb(self, dealt)
 	hp -= dealt
 	_dot_shown += dealt
 	if _dot_shown >= 10.0:
@@ -446,7 +558,7 @@ func _tick_status(dt: float) -> void:
 		key = 4
 	if key != _status_key:
 		_status_key = key
-		body.modulate = [Color.WHITE, Color(0.55, 0.85, 1.7), Color(1.5, 1.45, 0.75), Color(1.6, 0.8, 0.5), Color(0.75, 0.95, 1.35)][key]
+		body.modulate = [_tint, Color(0.55, 0.85, 1.7), Color(1.5, 1.45, 0.75), Color(1.6, 0.8, 0.5), Color(0.75, 0.95, 1.35)][key]
 		queue_redraw()
 	elif key == 2:
 		queue_redraw()
@@ -457,6 +569,18 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true)
 	if dead:
 		return
 	amount *= vulnerability()
+	if amount >= KILL_DAMAGE:
+		overkill = true
+		no_blast = true
+	elif _brain != null:
+		amount = _brain.absorb(self, amount)
+		_brain.on_hit(self)
+		if amount <= 0.0:
+			# 打在护盾或无敌阶段上：有火花没有血
+			_flash_t = 0.04
+			game.fx.spark(center())
+			Sfx.play("shield_block", -9.0, 0.15)
+			return
 	hp -= amount
 	_flash_t = 0.07
 	_stagger_t = 0.1
@@ -482,11 +606,16 @@ func _die(dir: Vector2) -> void:
 	game.decals.stamp(splats[randi() % splats.size()], position + Vector2(0, -2))
 	if size.x >= 24:
 		game.decals.stamp(splats[randi() % splats.size()], position + Vector2(randf_range(-10, 10), randf_range(-8, 6)))
-	Sfx.play("zombie_die", -4.0 if kind != "boss" else 2.0, 0.12)
+	Sfx.play("zombie_die", -4.0 if not is_boss else 2.0, 0.12)
+	game.hazards.clear_owner(self)
+	if kind == "summoner":
+		game.dismiss_minions(self)
+	if _brain != null:
+		_brain.on_die(self)
 	if kind == "exploder" and not no_blast:
 		# 打爆自爆僵尸有奖励：范围伤害会波及同类
 		game.explode.call_deferred(position + Vector2(0, -6), _damage * 0.7, 42.0, false)
-	if kind == "tank" or kind == "boss":
+	if kind == "tank" or is_boss:
 		game.hitstop(0.09 if kind == "tank" else 0.2)
 		game.add_shake(0.5 if kind == "tank" else 0.9)
 	else:
@@ -510,6 +639,13 @@ func _draw() -> void:
 			for k in 3:
 				var at := Vector2(cos(a + k * 2.1) * hit_r, y + sin(a + k * 2.1) * 2.0).round()
 				draw_rect(Rect2(at, Vector2(2, 2)), Color("#fff060"))
+	if _brain != null:
+		_brain.draw(self)
+	# 被尖叫鼓动的僵尸头顶亮红色感叹号
+	if _rally_t > 0.0:
+		var y := -center_h * 2.0 - 7.0
+		draw_rect(Rect2(0, y, 1, 3), Color("#ff5070"))
+		draw_rect(Rect2(0, y + 4, 1, 1), Color("#ff5070"))
 
 
 func _animate(dt: float, move_dir: Vector2, moved: float) -> void:
@@ -526,18 +662,21 @@ func _animate(dt: float, move_dir: Vector2, moved: float) -> void:
 			_dir_hold = 0.14
 		if _dir == Art.DIR_SIDE:
 			body.flip_h = face.x < 0.0
-	_walk += moved * (0.24 if size_is_small() else 0.13)
-	body.position = _lunge.round()
+	_walk += moved * (0.24 if size_is_small() else 0.13) + idle_anim * dt
+	body.position = _lunge.round() + Vector2(0, -roundf(lift))
 	_apply_frame()
 
 
 func size_is_small() -> bool:
-	return kind != "tank" and kind != "boss"
+	return kind != "tank" and not is_boss
 
 
 func _apply_frame() -> void:
-	var f := int(_walk) % Art.FRAMES
+	var f := int(_walk) % Art.FRAMES if _pose < 0 else _pose
 	var white := _flash_t > 0.0
+	# 危险招式蓄力时闪白，和地上的红圈同步
+	if _warn_t > 0.0 and int(_warn_t * 14.0) % 2 == 0:
+		white = true
 	# 引信和蓄力时高频闪白
 	if _fuse >= 0.0 and int(_fuse * 22.0) % 2 == 0:
 		white = true

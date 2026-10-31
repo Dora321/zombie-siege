@@ -7,6 +7,7 @@ const POOL_SIZE := 18
 const MIN_GAP_MS := {
 	"hit": 45, "groan": 500, "casing": 60, "wall_hit": 110, "coin": 40, "smg": 40,
 	"turret": 70, "base_hit": 160, "ui_hover": 40, "flamer": 75, "arc": 60, "cryo": 60, "beep": 90,
+	"shield_block": 70, "rock_fall": 70, "summon_pop": 70, "charge_warn": 120, "balloon_pop": 60, "split": 60,
 }
 
 var _streams := {}
@@ -89,7 +90,7 @@ func play(sound: String, volume_db := 0.0, jitter := 0.06) -> void:
 	p.play()
 
 
-## 切换背景音乐：menu（平静）/ combat（紧张）/ 空串（停止）。
+## 切换背景音乐：menu（平静）/ combat（紧张）/ boss（Boss 战）/ 空串（停止）。
 func play_music(track: String) -> void:
 	_music_wanted = track
 	_apply_music()
@@ -381,6 +382,90 @@ func _build_sfx() -> void:
 	b = _voice(b, 0, 1.0, 700, 180, "noise", 0.4, 1.4)
 	_add("boss_roar", b)
 
+	# 精英僵尸
+	b = _buf(0.45)
+	b = _voice(b, 0, 0.42, 5200, 2200, "noise", 0.34, 1.4)
+	b = _voice(b, 0, 0.3, 520, 880, "saw", 0.12, 1.2, 0.2)
+	_add("stalker_hiss", b)
+
+	b = _buf(0.14)
+	b = _voice(b, 0, 0.12, 2400, 1900, "sq", 0.2, 2.4)
+	b = _voice(b, 0, 0.1, 3400, 2900, "tri", 0.18, 2.4)
+	b = _voice(b, 0, 0.04, 6000, 3000, "noise", 0.3)
+	_add("shield_block", b)
+
+	b = _buf(0.45)
+	b = _voice(b, 0, 0.14, 3200, 1500, "sq", 0.22)
+	b = _voice(b, 0, 0.42, 6000, 900, "noise", 0.5, 2.0)
+	_add("shield_break", b)
+
+	b = _buf(0.4)
+	b = _voice(b, 0, 0.3, 700, 180, "noise", 0.55, 1.6)
+	b = _voice(b, 0.03, 0.2, 240, 620, "sin", 0.3)
+	b = _voice(b, 0.14, 0.2, 300, 780, "sin", 0.26)
+	_add("split", b)
+
+	b = _buf(1.1)
+	b = _voice(b, 0, 1.05, 110, 165, "saw", 0.2, 0.7, 0.05)
+	b = _voice(b, 0, 1.05, 220, 330, "tri", 0.16, 0.7, 0.06)
+	b = _voice(b, 0.3, 0.7, 880, 1320, "sin", 0.08, 0.8)
+	_add("summon", b)
+
+	b = _buf(0.22)
+	b = _voice(b, 0, 0.2, 180, 700, "sq", 0.16)
+	b = _voice(b, 0, 0.12, 2200, 700, "noise", 0.24)
+	_add("summon_pop", b)
+
+	b = _buf(1.0)
+	b = _voice(b, 0, 0.96, 1500, 2700, "saw", 0.26, 0.9, 0.16)
+	b = _voice(b, 0, 0.96, 2250, 3900, "sq", 0.08, 1.0, 0.2)
+	b = _voice(b, 0, 0.6, 7000, 3500, "noise", 0.2, 1.2)
+	_add("scream", b)
+
+	b = _buf(0.18)
+	b = _voice(b, 0, 0.03, 9000, 5000, "noise", 0.7)
+	b = _voice(b, 0.02, 0.15, 900, 180, "sq", 0.2)
+	_add("balloon_pop", b)
+
+	b = _buf(0.7)
+	b = _voice(b, 0, 0.68, 1900, 500, "sin", 0.14, 0.5)
+	_add("bomb_whistle", b)
+
+	# Boss 招式
+	b = _buf(0.3)
+	b = _voice(b, 0, 0.14, 500, 1100, "sq", 0.2, 0.8)
+	b = _voice(b, 0.14, 0.14, 700, 1500, "sq", 0.22, 0.8)
+	_add("charge_warn", b)
+
+	b = _buf(0.7)
+	b = _voice(b, 0, 0.65, 95, 26, "sin", 1.0, 1.6)
+	b = _voice(b, 0, 0.4, 2200, 200, "noise", 0.8, 1.8)
+	_add("slam", b)
+
+	b = _buf(0.34)
+	b = _voice(b, 0, 0.3, 1500, 240, "noise", 0.6, 2.0)
+	b = _voice(b, 0, 0.22, 130, 50, "tri", 0.6)
+	_add("rock_fall", b)
+
+	b = _buf(0.7)
+	b = _voice(b, 0, 0.66, 3600, 1400, "noise", 0.3, 1.0)
+	b = _voice(b, 0, 0.5, 160, 90, "saw", 0.12, 1.0, 0.1)
+	_add("fog_hiss", b)
+
+	b = _buf(1.5)
+	b = _voice(b, 0, 1.45, 70, 170, "saw", 0.5, 0.9, 0.14)
+	b = _voice(b, 0, 1.45, 105, 255, "saw", 0.3, 0.9, 0.1)
+	b = _voice(b, 0.1, 1.1, 1100, 320, "noise", 0.34, 1.2)
+	_add("boss_phase", b)
+
+	b = _buf(2.2)
+	b = _voice(b, 0, 1.3, 160, 28, "saw", 0.6, 1.4, 0.1)
+	b = _voice(b, 0, 1.0, 3000, 120, "noise", 0.7, 1.4)
+	var cheer := [392.0, 523.0, 659.0, 784.0]
+	for i in cheer.size():
+		b = _voice(b, 1.0 + i * 0.13, 0.28 if i < 3 else 0.6, cheer[i], cheer[i], "sq", 0.2, 1.2)
+	_add("boss_down", b)
+
 	b = _buf(1.6)
 	var fall := [392.0, 349.0, 311.0, 233.0]
 	for i in fall.size():
@@ -403,6 +488,8 @@ func _render_all_music() -> void:
 	_on_music_ready.call_deferred("menu", menu)
 	var combat: AudioStreamWAV = await _render_song(138.0, [45, 45, 48, 45, 41, 41, 43, 44], true)
 	_on_music_ready.call_deferred("combat", combat)
+	var boss: AudioStreamWAV = await _render_song(160.0, [40, 40, 43, 40, 36, 36, 38, 39], true)
+	_on_music_ready.call_deferred("boss", boss)
 
 
 func _on_music_ready(track: String, stream: AudioStreamWAV) -> void:

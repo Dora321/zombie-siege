@@ -7,6 +7,7 @@ const COL_HP := Color("#d83838")
 const COL_BASE := Color("#5a90d0")
 const COL_ARMOR := Color("#c8d4e8")
 const COL_DIM := Color(0, 0, 0, 0.55)
+const BOSS_BAR_W := 200.0
 
 var game: Node
 var _title := ""
@@ -79,7 +80,7 @@ func _draw() -> void:
 	if _announce_t > 0.0 and not get_tree().paused:
 		_draw_announce()
 	if _alert_t > 0.0 and int(_alert_t * 5.0) % 2 == 0 and not in_shop:
-		Art.draw_text(self, "基地遭到攻击！", Vector2(W * 0.5, 44), 12, Color("#ff7050"), 1)
+		Art.draw_text(self, "基地遭到攻击！", Vector2(W * 0.5, 44 if game.boss_list.is_empty() else 51), 12, Color("#ff7050"), 1)
 	if game.state == game.State.PLACING:
 		_draw_placement()
 	elif game.player_can_act() and not get_tree().paused:
@@ -134,9 +135,25 @@ func _draw_wave_info() -> void:
 	draw_texture(Art.skull_tex, Vector2(W * 0.5 - 18, 18))
 	Art.draw_tiny(self, str(left), Vector2(W * 0.5 - 7, 20), Color("#f0a090"))
 	if not game.boss_list.is_empty():
-		var boss: Variant = game.boss_list[0]
-		Art.draw_text(self, "屠夫", Vector2(W * 0.5 - 70, 28), 12, Color("#ff8060"), 2)
-		_bar(Rect2(W * 0.5 - 66, 32, 132, 5), boss.hp / boss.max_hp, Color("#c02828"))
+		_draw_boss_bar(game.boss_list[0])
+
+
+## Boss 血条：名字和阶段写在下面，竖线标出换阶段的血量，护盾是盖在上面的绿条。
+func _draw_boss_bar(boss: Variant) -> void:
+	var info: Dictionary = boss.boss_info()
+	var rect := Rect2(W * 0.5 - BOSS_BAR_W * 0.5, 29, BOSS_BAR_W, 7)
+	var flashing: bool = boss._brain.untouchable() and int(Time.get_ticks_msec() / 90) % 2 == 0
+	_bar(rect, boss.hp / boss.max_hp, Color("#fff0c0") if flashing else Color("#c02828"))
+	var phases: Array = GameData.BOSSES[boss.kind]["phases"]
+	for i in range(1, phases.size()):
+		var x: float = rect.position.x + roundf(rect.size.x * float(phases[i]["at"]))
+		draw_rect(Rect2(x, rect.position.y - 1, 1, rect.size.y + 2), Color("#f0ece0"))
+	var shield: float = info["shield"]
+	if shield > 0.0:
+		draw_rect(Rect2(rect.position, Vector2(roundf(rect.size.x * shield), 2)), Color("#b0ff70"))
+	var label := "%s  第 %d/%d 阶段：%s" % [info["title"], int(info["phase"]) + 1, int(info["count"]), info["name"]]
+	var col := Color("#b0ff70") if shield > 0.0 else (Color("#d8c0ff") if boss._brain.guarded() else Color("#ff9070"))
+	Art.draw_text(self, label, Vector2(W * 0.5, 37), 12, col, 1)
 
 
 func _draw_money() -> void:
@@ -237,7 +254,9 @@ func _draw_minimap() -> void:
 	for t: Variant in game.turrets:
 		draw_rect(Rect2(origin + (t.position / tile).floor(), Vector2(1, 1)), Color("#70e090"))
 	for z: Variant in game.zombies:
-		var col := Color("#ff4030") if z.kind != "boss" else Color("#ffe040")
+		if z.cloaked():
+			continue
+		var col := Color("#ff4030") if not z.is_boss else Color("#ffe040")
 		draw_rect(Rect2(origin + (z.position / tile).floor(), Vector2(1, 1)), col)
 	var pp: Vector2 = game.player.position / tile
 	draw_rect(Rect2(origin + pp.floor() - Vector2(1, 1), Vector2(3, 3)), Color.WHITE)
@@ -269,7 +288,7 @@ func _draw_announce() -> void:
 	draw_rect(Rect2(0, y - 4, W, 1), Color(1.0, 0.75, 0.3, 0.6 * alpha))
 	draw_rect(Rect2(0, y + 37, W, 1), Color(1.0, 0.75, 0.3, 0.6 * alpha))
 	Art.draw_text(self, _title, Vector2(W * 0.5, y), 24, Color(1.0, 0.85, 0.5, alpha), 1)
-	Art.draw_text(self, _sub, Vector2(W * 0.5, y + 22), 12, Color(0.92, 0.9, 0.84, alpha), 1)
+	Art.draw_text(self, _sub, Vector2(W * 0.5, y + 24), 12, Color(0.92, 0.9, 0.84, alpha), 1)
 
 
 func _draw_vignette() -> void:

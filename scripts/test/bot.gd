@@ -48,6 +48,11 @@ func tick(dt: float) -> void:
 			threat_d = base_d
 			threat = z
 	var target: Variant = nearest if nearest_d < 120.0 else threat
+	# 召唤者和尖叫者离得不远就先点掉，和人一样打有威胁的
+	for z: Variant in game.zombies:
+		if (z.kind == "summoner" or z.kind == "screamer") and nearest_d > 40.0 and p.position.distance_to(z.position) < 190.0:
+			target = z
+			break
 	var home: Vector2 = game.base.position + Vector2(0, 26)
 	if target == null:
 		firing = false
@@ -80,6 +85,15 @@ func tick(dt: float) -> void:
 	else:
 		move = p.position.direction_to(home) * 0.5 if p.position.distance_to(home) > 90.0 else Vector2.ZERO
 		move += aim_dir.orthogonal() * _strafe * 0.5
+	# 红圈、毒雾、冲撞通道：直接跑开，通道上来不及就冲刺
+	var danger: Variant = game.hazards.threat_at(p.position, 8.0)
+	if danger != null:
+		var off: Vector2 = p.position - danger
+		move = off.normalized() if off.length_squared() > 1.0 else aim_dir.orthogonal()
+		if skill > 0.5 and _dash_wait <= 0.0:
+			want_dash = true
+			_dash_wait = 2.0
+		return
 	# 踩到酸液就走开
 	for pool: Variant in game.bullets.pools:
 		if p.position.distance_to(pool.pos) < pool.r + 6.0:
@@ -101,10 +115,18 @@ func _usable(p: Variant, id: String) -> bool:
 func _pick_weapon(p: Variant, nearest_d: float, target: Variant) -> void:
 	var count: int = game.zombies.size()
 	var target_d: float = p.position.distance_to(target.position)
-	var big: bool = target.kind == "tank" or target.kind == "boss"
+	var big: bool = target.kind == "tank" or target.is_boss
 	var pick := "pistol"
 	if nearest_d < 50.0 and _usable(p, "flamer"):
 		pick = "flamer"
+	elif target.kind == "shielder" and target._brain.up:
+		# 护盾兵不走正面：优先范围武器和电弧
+		if target_d < 150.0 and _usable(p, "arc"):
+			pick = "arc"
+		elif target_d < 170.0 and target_d > 50.0 and _usable(p, "grenade"):
+			pick = "grenade"
+		elif _usable(p, "smg"):
+			pick = "smg"
 	elif nearest_d < 60.0 and _usable(p, "shotgun"):
 		pick = "shotgun"
 	elif big and target_d < 140.0 and _usable(p, "cryo") and target.vulnerability() <= 1.0:
@@ -148,7 +170,7 @@ func _use_items(p: Variant, dt: float, target: Variant) -> void:
 		pick = "decoy"
 	elif near >= 5 and int(inv["frag"]) > 0:
 		pick = "frag"
-	elif (target.kind == "tank" or target.kind == "boss") and int(inv["sticky"]) > 0:
+	elif (target.kind == "tank" or target.is_boss) and int(inv["sticky"]) > 0:
 		pick = "sticky"
 	elif near >= 5 and p.buff_damage_t <= 0.0 and int(inv["damage"]) > 0:
 		pick = "damage"

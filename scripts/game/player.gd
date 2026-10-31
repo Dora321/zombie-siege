@@ -34,6 +34,8 @@ var dash_t := 0.0
 var dash_cd := 0.0
 var dash_dir := Vector2.RIGHT
 var invuln := 0.0
+## 持续伤害系数，母体血清减半。
+var dot_mult := 1.0
 var recoil_px := 0.0
 var fired_kick := 0.0
 
@@ -533,12 +535,24 @@ func take_damage(amount: float, attacker_pos: Variant = null) -> void:
 func take_dot(amount: float) -> void:
 	if not alive or game.god_mode or dash_t > 0.0:
 		return
-	hp -= amount
+	hp -= amount * dot_mult
 	game.hud.flash_dot()
 	if hp <= 0.0:
 		hp = 0.0
 		invuln = 0.0
 		take_damage(1.0)
+
+
+## Boss 战利品：捡到立刻生效。
+func apply_trophy(id: String) -> void:
+	match id:
+		"heart":
+			max_hp += GameData.TROPHY_HP
+			hp = max_hp
+		"serum":
+			dot_mult = GameData.TROPHY_DOT
+		"crown":
+			game.score += GameData.TROPHY_SCORE
 
 
 func heal(amount: float) -> void:

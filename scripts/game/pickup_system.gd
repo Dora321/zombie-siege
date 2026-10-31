@@ -1,5 +1,5 @@
 extends Node2D
-## 掉落物：金币、弹药箱、医疗包、道具。弹一下落地，靠近会被吸过来，波次结束全部飞向玩家。
+## 掉落物：金币、弹药箱、医疗包、道具、Boss 战利品。弹一下落地，靠近会被吸过来，波次结束全部飞向玩家。
 
 class Item:
 	var pos: Vector2
@@ -70,6 +70,13 @@ func _physics_process(dt: float) -> void:
 	queue_redraw()
 
 
+## 通关时立刻结算，地上的战利品不能因为游戏结束就丢了。
+func collect_all() -> void:
+	for it in items:
+		_collect(it)
+	items.clear()
+
+
 func _collect(it: Item) -> void:
 	match it.kind:
 		"coin":
@@ -83,6 +90,11 @@ func _collect(it: Item) -> void:
 			game.player.heal(float(it.value))
 			game.fx.text(it.pos + Vector2(0, -8), "生命 +%d" % it.value, Color("#ff8080"))
 			Sfx.play("buy", -3.0)
+		"trophy":
+			var spec: Dictionary = GameData.TROPHIES[it.id]
+			game.player.apply_trophy(it.id)
+			game.fx.text(it.pos + Vector2(0, -8), "%s：%s" % [spec["name"], spec["desc"]], Color("#ffe080"))
+			Sfx.play("victory", -6.0)
 		"item":
 			if game.player.add_item(it.id, it.value):
 				game.fx.text(it.pos + Vector2(0, -8), "捡到%s" % GameData.ITEMS[it.id]["name"], Color("#a0e0ff"))
@@ -105,6 +117,11 @@ func _draw() -> void:
 				draw_texture(Art.ammo_tex, at - Art.ammo_tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))
 			"med":
 				draw_texture(Art.medkit_tex, at - Art.medkit_tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))
+			"trophy":
+				var tex: Texture2D = Art.trophy_tex[it.id]
+				# 战利品带一圈金光，隔着尸堆也能看见
+				draw_arc(at, 8.0 + sin(it.age * 6.0), 0.0, TAU, 16, Color(1.0, 0.85, 0.3, 0.8), 1.0)
+				draw_texture(tex, at - tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))
 			"item":
 				var tex: Texture2D = Art.item_tex[it.id]
 				draw_texture(tex, at - tex.get_size() * 0.5 + Vector2(0, sin(it.age * 5.0)))

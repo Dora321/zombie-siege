@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/title_menu.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/ui/bestiary.gd" id="2"]
 
 [node name="Title" type="Control"]
 layout_mode = 3
@@ -14,9 +15,9 @@ script = ExtResource("1")
 [node name="Menu" type="VBoxContainer" parent="."]
 layout_mode = 0
 offset_left = 60.0
-offset_top = 108.0
+offset_top = 100.0
 offset_right = 200.0
-offset_bottom = 218.0
+offset_bottom = 230.0
 theme_override_constants/separation = 5
 
 [node name="StartButton" type="Button" parent="Menu"]
@@ -30,6 +31,12 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "操作说明"
+
+[node name="BestiaryButton" type="Button" parent="Menu"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+text = "僵尸图鉴"
 
 [node name="ClearButton" type="Button" parent="Menu"]
 unique_name_in_owner = true
@@ -100,13 +107,50 @@ Esc 或 P 暂停    F11 或 F 全屏
 失败：基地被摧毁，或玩家生命归零
 波次之间打开商店，解锁武器、买道具、修墙
 放炮塔。玩家可穿过路障，僵尸不行
-红色炸药桶一枪就炸，引怪过去一网打尽！"
+第 5、10、15 波是 Boss 阶段战，地上亮红圈就快躲
+各种精英的克制办法见标题界面的「僵尸图鉴」"
 
 [node name="HelpClose" type="Button" parent="HelpPanel/VBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 20)
 layout_mode = 2
 text = "知道了"
+
+[node name="BestiaryPanel" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 14.0
+offset_top = 6.0
+offset_right = 466.0
+offset_bottom = 264.0
+script = ExtResource("2")
+
+[node name="Buttons" type="HBoxContainer" parent="BestiaryPanel"]
+layout_mode = 0
+offset_left = 110.0
+offset_top = 234.0
+offset_right = 342.0
+offset_bottom = 254.0
+theme_override_constants/separation = 6
+
+[node name="BestiaryPrev" type="Button" parent="BestiaryPanel/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+text = "上一页"
+
+[node name="BestiaryNext" type="Button" parent="BestiaryPanel/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+text = "下一页"
+
+[node name="BestiaryClose" type="Button" parent="BestiaryPanel/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+text = "关闭"
 
 [node name="ClickGate" type="ColorRect" parent="."]
 unique_name_in_owner = true

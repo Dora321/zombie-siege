@@ -1,10 +1,12 @@
 extends Control
 ## 标题菜单：动态背景（僵尸列队走向围墙）、开始游戏、操作说明、排行榜。
 
-const KINDS: Array[String] = ["walker", "walker", "runner", "walker", "spitter", "exploder", "tank", "walker", "runner"]
+const KINDS: Array[String] = ["walker", "walker", "runner", "walker", "spitter", "exploder", "tank", "walker", "runner", "shielder", "splitter", "screamer", "summoner", "balloon"]
 
 @onready var start_button: Button = %StartButton
 @onready var help_button: Button = %HelpButton
+@onready var bestiary_button: Button = %BestiaryButton
+@onready var bestiary_panel: Control = %BestiaryPanel
 @onready var clear_button: Button = %ClearButton
 @onready var quit_button: Button = %QuitButton
 @onready var help_panel: Control = %HelpPanel
@@ -33,13 +35,15 @@ func _ready() -> void:
 		_walkers.append(_new_walker(randf_range(-20, 500)))
 	start_button.pressed.connect(_on_start)
 	help_button.pressed.connect(_on_help)
+	bestiary_button.pressed.connect(_on_bestiary)
+	bestiary_panel.closed.connect(func(): start_button.grab_focus())
 	clear_button.pressed.connect(_on_clear)
 	quit_button.pressed.connect(func(): Sfx.quit_game())
 	help_close.pressed.connect(func():
 		help_panel.visible = false
 		Sfx.play("ui_click")
 		start_button.grab_focus())
-	for b: Button in [start_button, help_button, clear_button, quit_button, help_close]:
+	for b: Button in [start_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
 		b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
 	help_panel.visible = false
 	if OS.has_feature("web"):
@@ -91,6 +95,11 @@ func _on_help() -> void:
 	Sfx.play("ui_click")
 	help_panel.visible = true
 	help_close.grab_focus()
+
+
+func _on_bestiary() -> void:
+	Sfx.play("ui_click")
+	bestiary_panel.open()
 
 
 func _on_clear() -> void:

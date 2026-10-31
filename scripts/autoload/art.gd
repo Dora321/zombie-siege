@@ -5,6 +5,7 @@ const DIR_DOWN := 0
 const DIR_UP := 1
 const DIR_SIDE := 2
 const FRAMES := 4
+const EnemyArt := preload("res://scripts/game/enemy_art.gd")
 const OUTLINE := Color(0.075, 0.06, 0.09)
 
 ## 人形角色的参数。w/h 是画布，hw/hh 头，tw/th 躯干，lh 腿长。
@@ -43,6 +44,53 @@ const CHARS := {
 		"w": 36, "h": 34, "hw": 9, "hh": 7, "tw": 20, "th": 13, "lh": 7, "zombie": true,
 		"skin": "#a8706a", "hair": "#3a1c1c", "shirt": "#7c3a3a", "pants": "#2c2228",
 		"shoe": "#181418", "eye": "#ffe040", "arm_w": 4, "arm_len": 6, "apron": true, "pads": true,
+	},
+	# 精英和 Boss：style 决定 enemy_art.gd 里的造型，paint 表示整帧自己画，否则在通用人形上加细节
+	"stalker": {
+		"w": 18, "h": 20, "hw": 5, "hh": 5, "tw": 5, "th": 6, "lh": 4, "zombie": true, "style": "stalker",
+		"skin": "#6c6080", "hair": "#1c1826", "shirt": "#2c2838", "pants": "#211e2a",
+		"shoe": "#14121a", "eye": "#60f0ff", "arm_w": 1, "arm_len": 5, "lean": 1,
+	},
+	"shielder": {
+		"w": 20, "h": 20, "hw": 6, "hh": 6, "tw": 9, "th": 6, "lh": 4, "zombie": true, "style": "shielder",
+		"skin": "#9aa884", "hair": "#20242c", "shirt": "#2f3f5c", "pants": "#262c3c",
+		"shoe": "#14161c", "eye": "#ffd040", "arm_w": 2, "arm_len": 3, "pads": true,
+	},
+	"splitter": {
+		"w": 26, "h": 24, "hw": 5, "hh": 5, "tw": 15, "th": 13, "lh": 3, "zombie": true, "style": "splitter",
+		"skin": "#7ea04c", "hair": "#3f5a2a", "shirt": "#7a9c3c", "pants": "#3a4a24",
+		"shoe": "#20281a", "eye": "#ff4030", "arm_w": 2, "arm_len": 3, "round": true,
+	},
+	"splitling": {
+		"w": 14, "h": 12, "zombie": true, "style": "splitling", "paint": true,
+		"skin": "#8ab84c", "eye": "#ff4030",
+	},
+	"summoner": {
+		"w": 20, "h": 24, "zombie": true, "style": "summoner", "paint": true,
+	},
+	"imp": {
+		"w": 14, "h": 14, "hw": 5, "hh": 4, "tw": 4, "th": 3, "lh": 3, "zombie": true, "style": "imp",
+		"skin": "#d8d4c0", "hair": "#a8a490", "shirt": "#4a3a6a", "pants": "#3a2e50",
+		"shoe": "#1c1826", "eye": "#d060ff", "arm_w": 1, "arm_len": 3,
+	},
+	"screamer": {
+		"w": 18, "h": 22, "hw": 7, "hh": 7, "tw": 5, "th": 6, "lh": 4, "zombie": true, "style": "screamer",
+		"skin": "#b4a8c0", "hair": "#d04a6a", "shirt": "#6c3a5a", "pants": "#34283c",
+		"shoe": "#1c1820", "eye": "#fff060", "arm_w": 1, "arm_len": 4,
+	},
+	"balloon": {
+		"w": 20, "h": 36, "zombie": true, "style": "balloon", "paint": true,
+		"skin": "#86a862", "hair": "#3a3226", "shirt": "#6c8a5a", "pants": "#4d4034", "eye": "#e83a2a",
+	},
+	"plague": {
+		"w": 42, "h": 38, "hw": 8, "hh": 6, "tw": 26, "th": 20, "lh": 4, "zombie": true, "style": "plague",
+		"skin": "#7a9a50", "hair": "#3c5028", "shirt": "#5e7a38", "pants": "#2c3820",
+		"shoe": "#181e12", "eye": "#e0ff40", "arm_w": 3, "arm_len": 5, "round": true,
+	},
+	"overlord": {
+		"w": 48, "h": 46, "hw": 11, "hh": 9, "tw": 26, "th": 16, "lh": 8, "zombie": true, "style": "overlord",
+		"skin": "#8a8aa0", "hair": "#20182c", "shirt": "#3a2a4c", "pants": "#1c1824",
+		"shoe": "#100e14", "eye": "#ff3020", "arm_w": 5, "arm_len": 7, "pads": true,
 	},
 }
 
@@ -83,6 +131,9 @@ const DECOY_ITEM := ["...sss...", "...sss...", "..yyyyy..", ".wwyyyww.", "...yyy
 const INF_AMMO := ["..yyyyy..", ".yoooooy.", "yooyoyooy", "yoyoyoyoy", "yooyoyooy", ".yoooooy.", "..yyyyy.."]
 const SPEED_POTION := ["...kk....", "...ss....", "..ssss...", ".sbbbbs..", "sbblbbbs.", "sbbbbbbs.", ".ssssss.."]
 const DAMAGE_POTION := ["...kk....", "...ss....", "..ssss...", ".srrrrs..", "srrlrrrs.", "srrrrrrs.", ".ssssss.."]
+const TROPHY_HEART := [".rr...rr.", "rlrr.rrrr", "rrrrrrrrr", "rrrrrrrrd", ".rrrrrrd.", "..rrrrd..", "...rrd..."]
+const TROPHY_SERUM := ["...kk....", "...ss....", "...ss....", "..snns...", ".snGGns..", ".snnnns..", "..ssss..."]
+const TROPHY_CROWN := ["y...y...y", "yy.yyy.yy", "yyyyyyyyy", "yryybyyry", "yyyyyyyyy", "ddddddddd"]
 const NUKE := ["kkkkkkkkk", "kyyyyyyyk", "kykkkkyyk", "kyykkyyyk", "kyyykyyyk", "kyyyyyyyk", "kkkkkkkkk"]
 const DECOY_BODY := ["...sss...", "...sss...", "m..www..m", "mmywwwymm", "...www...", "...www...", "...www...", "...d.d...", "...d.d...", "..dd.dd.."]
 const MISC_PAL := {
@@ -111,6 +162,7 @@ var heart_tex: Texture2D
 var shield_tex: Texture2D
 var skull_tex: Texture2D
 var item_tex := {}
+var trophy_tex := {}
 var boomerang_tex: Texture2D
 var decoy_tex: Texture2D
 var shadow_small: Texture2D
@@ -165,7 +217,7 @@ func char_image(kind: String, dir: int, index: int) -> Image:
 
 ## 把图集里的图片合成一张预览图，供开发时肉眼检查。
 func debug_sheet() -> Image:
-	var sheet := Image.create_empty(320, 320, false, Image.FORMAT_RGBA8)
+	var sheet := Image.create_empty(640, 480, false, Image.FORMAT_RGBA8)
 	sheet.fill(Color(0.3, 0.42, 0.26))
 	var y := 2
 	for kind in CHARS.keys():
@@ -176,7 +228,7 @@ func debug_sheet() -> Image:
 				var im: Image = _chars[kind]["images"][d][f]
 				sheet.blit_rect_mask(im, im, Rect2i(0, 0, size.x, size.y), Vector2i(x, y))
 				x += size.x + 1
-				if x + size.x > 318:
+				if x + size.x > 638:
 					x = 2
 					y += size.y + 1
 		y += size.y + 2
@@ -326,7 +378,13 @@ func _build_char(kind: String, rng: RandomNumberGenerator) -> void:
 		var w_row: Array[Texture2D] = []
 		var i_row: Array[Image] = []
 		for f in FRAMES:
-			var img := _paint_char(spec, d, f, wounds)
+			var img: Image
+			if spec.get("paint", false):
+				img = EnemyArt.paint(self, String(spec["style"]), spec, d, f)
+			else:
+				img = _paint_char(spec, d, f, wounds)
+				if spec.has("style"):
+					EnemyArt.decorate(self, String(spec["style"]), img, spec, d, f)
 			_outline(img)
 			i_row.append(img)
 			n_row.append(_tex(img))
@@ -588,6 +646,11 @@ func _build_items(_rng: RandomNumberGenerator) -> void:
 	for id: String in icons.keys():
 		item_tex[id] = _tex(_ascii(icons[id], MISC_PAL))
 	decoy_tex = _tex(_ascii(DECOY_BODY, MISC_PAL))
+	trophy_tex = {
+		"heart": _tex(_ascii(TROPHY_HEART, MISC_PAL)),
+		"serum": _tex(_ascii(TROPHY_SERUM, MISC_PAL)),
+		"crown": _tex(_ascii(TROPHY_CROWN, MISC_PAL)),
+	}
 	shadow_small = _tex(_shadow(11, 4))
 	shadow_medium = _tex(_shadow(19, 6))
 	shadow_big = _tex(_shadow(29, 9))

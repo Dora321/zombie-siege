@@ -75,7 +75,7 @@ func _find_target() -> Variant:
 	var best: Variant = null
 	var best_d := _range()
 	for z: Variant in game.zombies_near(position, _range()):
-		if z.dead:
+		if z.dead or z.cloaked():
 			continue
 		var d: float = position.distance_to(z.position)
 		if d < best_d and map.line_clear(position + Vector2(0, -2), z.position, map.BLOCK_BULLET):

@@ -17,11 +17,17 @@ const BUCKET_W := 33
 const BUCKET_H := 23
 const COMBO_WINDOW := 2.6
 const CAMERA_LOOK := 0.2
+## 召唤物和分裂小怪可以稍微超过同屏上限，免得分裂体死了没有小怪。
+const MINION_OVERFLOW := 15
+## Boss 在场时普通僵尸出得慢一些，把注意力留给 Boss。
+const BOSS_SPAWN_SLOW := 2.0
+const BOSS_DOWN_HOLD := 2.2
 
 @onready var map: Node2D = $Map
 @onready var decals: Node2D = $Decals
 @onready var pickups: Node2D = $Pickups
 @onready var entities: Node2D = $Entities
+@onready var hazards: Node2D = $Hazards
 @onready var bullets: Node2D = $Bullets
 @onready var ordnance: Node2D = $Ordnance
 @onready var fx: Node2D = $Fx
@@ -76,6 +82,8 @@ var _groan_t := 3.0
 var _base_alert_t := 0.0
 var _over_t := -1.0
 var _hit_marker := 0.0
+var _boss_hold_t := 0.0
+var _acid_t := 0.0
 
 
 func _ready() -> void:
@@ -92,6 +100,7 @@ func _ready() -> void:
 	decals.position = Vector2.ZERO
 	bullets.setup(self, map)
 	ordnance.setup(self, map)
+	hazards.setup(self, map)
 	fx.setup(self, decals)
 	pickups.setup(self)
 	base = BaseScene.instantiate()
@@ -132,7 +141,9 @@ func _physics_process(dt: float) -> void:
 			time_alive += dt
 			_tick_spawner(dt)
 			_tick_ambience(dt)
-			if _queue.is_empty() and zombies.is_empty():
+			_tick_special(dt)
+			_boss_hold_t -= dt
+			if _queue.is_empty() and zombies.is_empty() and _boss_hold_t <= 0.0:
 				_wave_cleared()
 		State.CLEARED:
 			if _state_t <= 0.0:
@@ -204,7 +215,10 @@ func _begin_countdown(next_wave: int) -> void:
 		if dropped < 10:
 			map.respawn_barrels(_rng, 2)
 	_tween_tint(_combat_tint())
-	hud.announce("第 %d 波：%s" % [wave, GameData.wave_name(wave)], "共 %d 只僵尸，准备迎战" % _queue.size(), COUNTDOWN_TIME)
+	var sub: String = GameData.wave_hint(wave)
+	if sub == "":
+		sub = "共 %d 只僵尸，准备迎战" % _queue.size()
+	hud.announce("第 %d 波：%s" % [wave, GameData.wave_name(wave)], sub, COUNTDOWN_TIME)
 	Sfx.play_music("menu")
 
 
@@ -213,9 +227,10 @@ func _begin_combat() -> void:
 	_spawn_t = 0.0
 	Sfx.play("siren", -4.0, 0.0)
 	Sfx.play_music("combat")
-	if _queue.has("boss"):
-		hud.announce("警告：屠夫来袭！", "它的冲锋能撞碎一切", 2.6)
-		Sfx.play("boss_roar")
+	for kind: String in GameData.BOSSES.keys():
+		if _queue.has(kind):
+			hud.announce("Boss 战：%s" % GameData.BOSSES[kind]["title"], "击退前锋后它就会现身", 2.6)
+			Sfx.play("boss_roar", -6.0)
 
 
 func _tick_spawner(dt: float) -> void:
@@ -225,6 +240,8 @@ func _tick_spawner(dt: float) -> void:
 	if _spawn_t > 0.0 or zombies.size() >= MAX_ALIVE:
 		return
 	_spawn_t = GameData.spawn_interval(wave) * randf_range(0.7, 1.3)
+	if not boss_list.is_empty():
+		_spawn_t *= BOSS_SPAWN_SLOW
 	if _group_left <= 0:
 		_spawn_side = ["top", "bottom", "left", "right"][_rng.randi() % 4]
 		_group_left = _rng.randi_range(3, 5 + wave / 2)
@@ -242,15 +259,124 @@ func _spawn_zombie(kind: String) -> void:
 		cells = map.spawn_cells["top"]
 	# 优先从道路方向过来，地图边缘看起来才有“涌向基地”的感觉
 	var cell: int = cells[_rng.randi() % cells.size()]
-	var z: Node2D = ZombieScene.instantiate()
-	entities.add_child(z)
 	var offset := Vector2(_rng.randf_range(-4, 4), _rng.randf_range(-4, 4))
 	var pos: Vector2 = map.cell_center(cell) + offset
 	pos = map.unstick(pos, 5.0, map.BLOCK_ZOMBIE)
+	var z := _add_zombie(kind, pos)
+	if z.is_boss:
+		boss_list.append(z)
+		_on_boss_spawn(z)
+
+
+func _add_zombie(kind: String, pos: Vector2) -> Node2D:
+	var z: Node2D = ZombieScene.instantiate()
+	entities.add_child(z)
 	z.setup(self, map, kind, pos, wave)
 	zombies.append(z)
-	if kind == "boss":
-		boss_list.append(z)
+	return z
+
+
+## 召唤物和分裂小怪。超过上限返回 null。
+func spawn_minion(kind: String, pos: Vector2, owner_node: Variant = null) -> Variant:
+	if zombies.size() >= MAX_ALIVE + MINION_OVERFLOW:
+		return null
+	var ground: Vector2 = pos
+	if not GameData.ZOMBIES[kind].get("flying", false):
+		ground = map.unstick(pos, 5.0, map.BLOCK_ZOMBIE)
+	var z := _add_zombie(kind, ground)
+	z.master = owner_node
+	return z
+
+
+## 主人死了，它叫来的东西一起散，不给金币。
+func dismiss_minions(owner_node: Variant) -> void:
+	for z: Variant in zombies.duplicate():
+		if z.master == owner_node and not z.dead:
+			fx.dust(z.position, 5)
+			z.no_blast = true
+			z.dismissed = true
+			z.take_damage(99999.0, Vector2.UP, 0.0, false)
+
+
+## 尖叫：半径内的僵尸加速冲锋。
+func rally(pos: Vector2, radius: float, seconds: float, source: Variant) -> void:
+	for z: Variant in zombies_near(pos, radius + 16.0):
+		if z != source and not z.dead and z.position.distance_to(pos) <= radius:
+			z.rally(seconds)
+	fx.ring(pos + Vector2(0, -8), radius, 0.5, Color("#ff5070"))
+
+
+# ---------------------------------------------------------------------------
+# Boss 战
+# ---------------------------------------------------------------------------
+
+func _on_boss_spawn(z: Variant) -> void:
+	var spec: Dictionary = GameData.BOSSES[z.kind]
+	hud.announce("警告：%s 来袭！" % spec["title"], String(spec["warn"]), 2.6)
+	Sfx.play("boss_roar")
+	Sfx.play_music("boss")
+	add_shake(0.4)
+
+
+func on_boss_phase(z: Variant, phase_spec: Dictionary, index: int, total: int) -> void:
+	var title: String = GameData.BOSSES[z.kind]["title"]
+	Harness.note("%s 进入第 %d/%d 阶段 %s（血 %d/%d）" % [title, index + 1, total, phase_spec["name"], roundi(z.hp), roundi(z.max_hp)])
+	hud.announce("%s 第 %d/%d 阶段：%s" % [title, index + 1, total, phase_spec["name"]], String(phase_spec["sub"]), 2.2)
+	Sfx.play("boss_phase")
+	add_shake(0.8)
+	fx.ring(z.center(), 70.0, 0.5, Color("#ffd080"))
+	fx.dust(z.position, 16)
+
+
+func on_boss_down(z: Variant) -> void:
+	if z.overkill:
+		return
+	var spec: Dictionary = GameData.BOSSES[z.kind]
+	Harness.note("%s 被击败，用过的招式：%s" % [spec["title"], ",".join(z._brain.moves_used.keys())])
+	_boss_hold_t = BOSS_DOWN_HOLD
+	hud.announce("%s 倒下了！" % spec["title"], "快去捡战利品：%s" % GameData.TROPHIES[spec["trophy"]]["name"], BOSS_DOWN_HOLD)
+	Sfx.play("boss_down")
+	hazards.clear_owner(z)
+	for i in 5:
+		explode.call_deferred(z.position + Vector2(randf_range(-26, 26), randf_range(-34, 4)), 0.0, 30.0, true)
+	if boss_list.is_empty():
+		Sfx.play_music("combat")
+	if bool(spec.get("final", false)):
+		# 尸王一倒，整座城的尸群跟着散，掉落全部飞向玩家
+		_queue.clear()
+		pickups.magnet_all = true
+		hazards.clear()
+		for other: Variant in zombies.duplicate():
+			if other != z and not other.dead:
+				other.no_blast = true
+				other.take_damage(99999.0, Vector2.UP, 0.0, false)
+
+
+## 战利品：金币雨、必掉道具、专属战利品和一个急救包。
+func _boss_loot(z: Variant) -> void:
+	var spec: Dictionary = GameData.BOSSES[z.kind]
+	var at: Vector2 = z.position + Vector2(0, -4)
+	for id: String in spec["drops"]:
+		pickups.drop(at, "item", 1, id)
+	pickups.drop(at, "med", 25)
+	pickups.drop(at, "trophy", 1, String(spec["trophy"]))
+	fx.text(z.position + Vector2(0, -z.center_h * 2.0 - 12.0), "金币雨 +%d" % int(GameData.ZOMBIES[z.kind]["coins"]), Color("#ffe060"))
+
+
+# ---------------------------------------------------------------------------
+# 特殊波
+# ---------------------------------------------------------------------------
+
+func _tick_special(dt: float) -> void:
+	if GameData.wave_special(wave) != "acid_rain" or _queue.is_empty() and zombies.is_empty():
+		return
+	_acid_t -= dt
+	if _acid_t > 0.0 or player == null or not player.alive:
+		return
+	_acid_t = GameData.ACID_RAIN_GAP
+	for i in GameData.ACID_RAIN_COUNT:
+		var at: Vector2 = player.position + player.velocity * 0.6 + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(0.0, 70.0)
+		hazards.acid(at, GameData.ACID_RAIN_DAMAGE * GameData.damage_scale(wave))
 
 
 func _tick_ambience(dt: float) -> void:
@@ -262,6 +388,7 @@ func _tick_ambience(dt: float) -> void:
 
 func _wave_cleared() -> void:
 	bullets.clear_hazards()
+	hazards.clear()
 	ordnance.clear_field()
 	pickups.magnet_all = true
 	var bonus := GameData.wave_bonus(wave)
@@ -273,6 +400,7 @@ func _wave_cleared() -> void:
 	_tween_tint(Color.WHITE)
 	if wave >= GameData.MAX_WAVE:
 		victory = true
+		pickups.collect_all()
 		hud.announce("守住了！救援直升机抵达", "你撑过了全部 %d 波" % GameData.MAX_WAVE, CLEARED_TIME)
 		_finish_game("基地守住了，幸存者全部撤离。")
 		return
@@ -295,6 +423,10 @@ func start_next_wave() -> void:
 
 
 func _combat_tint() -> Color:
+	if GameData.wave_special(wave) == "blackout":
+		return Color(0.42, 0.45, 0.68)
+	if GameData.wave_special(wave) == "acid_rain":
+		return Color(0.78, 0.92, 0.66)
 	if wave >= GameData.MAX_WAVE:
 		return Color(0.82, 0.58, 0.58)
 	if wave % 5 == 0:
@@ -356,8 +488,12 @@ func remove_turret(t: Variant) -> void:
 # ---------------------------------------------------------------------------
 
 func credit_kill(z: Variant, drops: bool) -> void:
+	# 主人死后散掉的召唤物不算击杀，也不给钱
+	if z.dismissed:
+		return
 	var stat: Dictionary = GameData.ZOMBIES[z.kind]
 	kills += 1
+	Harness.on_kill(z.kind)
 	combo += 1
 	combo_t = COMBO_WINDOW
 	best_combo = maxi(best_combo, combo)
@@ -366,10 +502,20 @@ func credit_kill(z: Variant, drops: bool) -> void:
 		pickups.drop(z.position, "coin", int(stat["coins"]))
 		return
 	var total: int = stat["coins"]
+	# Boss 叫来的精英只给一半钱，否则站着刷怪比打 Boss 还赚
+	if z.master != null:
+		total = (total + 1) / 2
 	while total > 0:
 		var v := mini(total, 10 if total >= 10 else 3)
 		pickups.drop(z.position + Vector2(0, -4), "coin", v)
 		total -= v
+	if z.is_boss:
+		score += int(stat["score"])
+		if not z.overkill:
+			_boss_loot(z)
+		return
+	if z.master != null:
+		return
 	var entry := GameData.roll_drop(z.kind)
 	if entry.has("item"):
 		pickups.drop(z.position + Vector2(0, -4), "item", 1, String(entry["item"]))
@@ -484,13 +630,39 @@ func explode(pos: Vector2, damage: float, radius: float, friendly: bool, spare_b
 		if d < radius + float(z.hit_r):
 			var falloff := 1.0 - clampf(d / (radius + 12.0), 0.0, 0.7)
 			var mult := 2.2 if friendly else 1.4
+			# 爆炸不看朝向，还会狠狠削一下盾
+			z.shield_hit(damage * falloff * mult)
 			z.take_damage(damage * falloff * mult, pos.direction_to(z.center()), 160.0)
 	if player != null and player.alive:
 		var pd: float = pos.distance_to(player.position + Vector2(0, -6))
 		if pd < radius:
 			var falloff := 1.0 - clampf(pd / radius, 0.0, 0.7)
 			player.take_damage(damage * falloff * (0.6 if friendly else 1.0), pos)
-	# 建筑
+	for s: Variant in _structures_in(pos, radius):
+		if s.kind == "barrel":
+			s.take_damage.call_deferred(1000.0)
+		elif s.kind == "base":
+			if not spare_base:
+				s.take_damage(damage * 0.6)
+		elif not friendly:
+			s.take_damage(damage * 1.5)
+
+
+## Boss 招式的落点结算：伤玩家、诱饵和建筑，不伤僵尸。
+func damage_area(pos: Vector2, radius: float, damage: float, structure_mult: float) -> void:
+	ordnance.hurt_decoys(pos, damage, radius)
+	if player != null and player.alive and pos.distance_to(player.position) < radius:
+		player.take_damage(damage, pos)
+	for s: Variant in _structures_in(pos, radius):
+		if s.kind == "barrel":
+			s.take_damage.call_deferred(1000.0)
+		elif s.kind == "base":
+			s.take_damage(damage)
+		else:
+			s.take_damage(damage * structure_mult)
+
+
+func _structures_in(pos: Vector2, radius: float) -> Array:
 	var seen := {}
 	var tile: int = map.TILE
 	var cx0 := clampi(int(pos.x - radius) / tile, 0, map.W - 1)
@@ -507,14 +679,7 @@ func explode(pos: Vector2, damage: float, radius: float, friendly: bool, spare_b
 			if not seen.has(s):
 				seen[s] = true
 				hit_list.append(s)
-	for s: Variant in hit_list:
-		if s.kind == "barrel":
-			s.take_damage.call_deferred(1000.0)
-		elif s.kind == "base":
-			if not spare_base:
-				s.take_damage(damage * 0.6)
-		elif not friendly:
-			s.take_damage(damage * 1.5)
+	return hit_list
 
 
 # ---------------------------------------------------------------------------

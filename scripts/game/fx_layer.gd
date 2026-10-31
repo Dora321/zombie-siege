@@ -137,7 +137,7 @@ func blood_hit(pos: Vector2, dir: Vector2, count: int, color: Color) -> void:
 
 func gibs(kind: String, pos: Vector2, dir: Vector2) -> void:
 	var pieces: Array = Art.gib_sets.get(kind, [])
-	var big := kind == "tank" or kind == "boss"
+	var big := kind == "tank" or GameData.BOSSES.has(kind)
 	for piece: Dictionary in pieces:
 		var p := _spawn()
 		p.x = pos.x + randf_range(-5, 5)

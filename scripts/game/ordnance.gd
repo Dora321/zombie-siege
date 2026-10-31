@@ -19,6 +19,7 @@ const NUKE_TANK_HIT := 0.6
 const STUN_TANK := 0.6
 const STUN_BOSS := 0.3
 const RANG_LIFE := 6.0
+const SHIELD_PIERCE := 0.5
 
 class Lob:
 	var from: Vector2
@@ -130,7 +131,12 @@ func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: floa
 	for i in mini(hit_list.size(), pierce + 1):
 		var z: Variant = hit_list[i]["z"]
 		var at: Vector2 = z.center()
-		z.take_damage(damage, dir, knock)
+		# 狙击枪能打穿护盾，但伤害减半
+		if z.blocks_shot(dir):
+			z.shield_hit(damage)
+			z.take_damage(damage * SHIELD_PIERCE, dir, knock)
+		else:
+			z.take_damage(damage, dir, knock)
 		game.fx.spark(at)
 		game.bullets.shots_hit += 1
 		game.on_bullet_hit()
@@ -279,7 +285,7 @@ func _flash_burst(pos: Vector2, radius: float, seconds: float) -> void:
 		var mult := 1.0
 		if z.kind == "tank":
 			mult = STUN_TANK
-		elif z.kind == "boss":
+		elif z.is_boss:
 			mult = STUN_BOSS
 		z.stun(seconds * mult)
 
@@ -408,6 +414,10 @@ func _step_rang(r: Rang, dt: float) -> bool:
 		var reach: float = float(z.hit_r) + 5.0
 		if z.center().distance_squared_to(r.pos) <= reach * reach:
 			r.hits.append(z)
+			if z.blocks_shot(r.dir):
+				z.shield_hit(r.damage)
+				game.fx.spark(r.pos)
+				continue
 			z.take_damage(r.damage, r.dir, r.knock)
 			game.bullets.shots_hit += 1
 			game.on_bullet_hit()
@@ -446,6 +456,7 @@ func start_nuke(pos: Vector2) -> void:
 	_nuke_pos = pos
 	_nuke_hit.clear()
 	game.bullets.clear_hazards()
+	game.hazards.clear()
 	game.hud.screen_flash(1.0, Color.WHITE)
 	game.add_shake(1.0)
 	Sfx.play("nuke")
@@ -459,15 +470,14 @@ func _step_nuke(dt: float) -> void:
 			continue
 		_nuke_hit[z] = true
 		var dir: Vector2 = _nuke_pos.direction_to(z.position)
-		match z.kind:
-			"boss":
-				z.take_damage(z.max_hp * NUKE_BOSS_HIT, dir, 200.0)
-			"tank":
-				z.take_damage(z.max_hp * NUKE_TANK_HIT, dir, 200.0)
-			_:
-				# 核弹清掉的自爆僵尸不再二次爆炸，免得误伤玩家
-				z.no_blast = true
-				z.take_damage(99999.0, dir, 200.0, false)
+		if z.is_boss:
+			z.take_damage(z.max_hp * NUKE_BOSS_HIT, dir, 200.0)
+		elif z.kind == "tank":
+			z.take_damage(z.max_hp * NUKE_TANK_HIT, dir, 200.0)
+		else:
+			# 核弹清掉的自爆僵尸不再二次爆炸，分裂体也不再分裂
+			z.no_blast = true
+			z.take_damage(99999.0, dir, 200.0, false)
 	if nuke_r >= NUKE_END_R:
 		nuke_r = -1.0
 		_nuke_hit.clear()

@@ -115,7 +115,7 @@ const DAMAGE_BUFF := 1.6
 ## 道具已带满时捡到的折算金币。
 const ITEM_OVERFLOW_COINS := 10
 
-## 击杀掉落：按顺序掷一次，互斥。坦克概率翻倍，Boss 必掉一件。
+## 击杀掉落：按顺序掷一次，互斥。坦克概率翻倍，精英 1.5 倍，Boss 必掉。
 const DROPS: Array[Dictionary] = [
 	{"kind": "ammo", "chance": 0.045},
 	{"kind": "med", "chance": 0.02},
@@ -132,58 +132,164 @@ const DROPS: Array[Dictionary] = [
 	{"item": "nuke", "chance": 0.0006},
 ]
 const BOSS_DROPS: Array[String] = ["nuke", "damage", "inf_ammo", "armor", "ammo_crate"]
+const ELITE_DROP_MULT := 1.5
+## Boss 专属战利品：捡到立刻生效，整局有效。
+const TROPHIES := {
+	"heart": {"name": "屠夫之心", "desc": "生命上限 +25 并回满"},
+	"serum": {"name": "母体血清", "desc": "毒雾和酸液伤害减半"},
+	"crown": {"name": "尸王之冠", "desc": "分数 +3000"},
+}
+const TROPHY_HP := 25.0
+const TROPHY_DOT := 0.5
+const TROPHY_SCORE := 3000
 
 ## 僵尸属性：hit_r 是子弹判定半径，center 是身体中心离脚底的高度。
+## desc 和 tip 是图鉴文案，is_boss 的配置在 BOSSES。
 const ZOMBIES := {
 	"walker": {
 		"name": "普通僵尸", "hp": 34.0, "speed": 27.0, "damage": 7.0, "attack_cd": 0.95,
 		"coins": 3, "score": 10, "hit_r": 6.0, "center": 7.0, "knock_res": 0.0, "aggro": 85.0,
-		"blood": "#8c1c1c",
+		"blood": "#8c1c1c", "desc": "速度慢，数量多", "tip": "手枪和炮塔就能处理",
 	},
 	"runner": {
 		"name": "快跑僵尸", "hp": 18.0, "speed": 62.0, "damage": 5.0, "attack_cd": 0.55,
 		"coins": 3, "score": 15, "hit_r": 5.5, "center": 6.0, "knock_res": 0.0, "aggro": 130.0,
-		"blood": "#8c1c1c",
+		"blood": "#8c1c1c", "desc": "血薄跑得快，老远就盯上你", "tip": "冲锋枪扫，别被围",
 	},
 	"tank": {
 		"name": "坦克僵尸", "hp": 240.0, "speed": 18.0, "damage": 22.0, "attack_cd": 1.25,
 		"coins": 14, "score": 60, "hit_r": 11.0, "center": 11.0, "knock_res": 0.85, "aggro": 90.0,
-		"blood": "#6e1414",
+		"blood": "#6e1414", "desc": "血厚不吃击退，拆墙伤害翻倍", "tip": "集火，引去炸药桶",
 	},
 	"exploder": {
 		"name": "自爆僵尸", "hp": 26.0, "speed": 38.0, "damage": 42.0, "attack_cd": 1.0,
 		"coins": 6, "score": 25, "hit_r": 8.0, "center": 8.0, "knock_res": 0.2, "aggro": 110.0,
-		"blood": "#7f9c20",
+		"blood": "#7f9c20", "desc": "碰到东西 0.5 秒后爆炸", "tip": "远距离打死，还能炸到同类",
 	},
 	"spitter": {
 		"name": "喷吐僵尸", "hp": 36.0, "speed": 24.0, "damage": 9.0, "attack_cd": 2.4,
 		"coins": 6, "score": 30, "hit_r": 6.0, "center": 7.0, "knock_res": 0.0, "aggro": 150.0,
-		"blood": "#4c8a2a", "range": 135.0,
+		"blood": "#4c8a2a", "range": 135.0, "desc": "远程吐酸越过围墙，留下酸液池", "tip": "优先击杀，别站在酸液里",
+	},
+	"stalker": {
+		"name": "潜伏者", "hp": 46.0, "speed": 40.0, "damage": 24.0, "attack_cd": 1.4,
+		"coins": 8, "score": 45, "hit_r": 5.5, "center": 8.0, "knock_res": 0.1, "aggro": 260.0,
+		"blood": "#4a2a6a", "melee": 0.4, "elite": true,
+		"desc": "半透明摸到身边，现身后猛扑一口", "tip": "留意地上的扭曲，一闪红就冲刺躲开",
+	},
+	"shielder": {
+		"name": "护盾兵", "hp": 72.0, "speed": 23.0, "damage": 11.0, "attack_cd": 1.1,
+		"coins": 10, "score": 45, "hit_r": 7.0, "center": 9.0, "knock_res": 0.7, "aggro": 120.0,
+		"blood": "#8c1c1c", "shield": 70.0, "elite": true,
+		"desc": "盾牌挡下正面子弹，盾转得慢", "tip": "绕后，或用爆炸、火焰、电弧、眩晕",
+	},
+	"splitter": {
+		"name": "分裂体", "hp": 80.0, "speed": 25.0, "damage": 9.0, "attack_cd": 1.0,
+		"coins": 7, "score": 35, "hit_r": 9.0, "center": 9.0, "knock_res": 0.3, "aggro": 90.0,
+		"blood": "#6a9c30", "split": 3, "elite": true,
+		"desc": "死后裂成 2~3 只快跑的小怪", "tip": "留一发范围武器收拾小怪",
+	},
+	"splitling": {
+		"name": "分裂小怪", "hp": 14.0, "speed": 54.0, "damage": 4.0, "attack_cd": 0.7,
+		"coins": 1, "score": 4, "hit_r": 4.5, "center": 4.0, "knock_res": 0.0, "aggro": 130.0,
+		"blood": "#6a9c30", "desc": "分裂体死后的碎块", "tip": "一枪一只",
+	},
+	"summoner": {
+		"name": "召唤者", "hp": 60.0, "speed": 21.0, "damage": 6.0, "attack_cd": 1.2,
+		"coins": 12, "score": 60, "hit_r": 6.5, "center": 10.0, "knock_res": 0.1, "aggro": 170.0,
+		"blood": "#5a2a8a", "elite": true,
+		"desc": "躲在远处吟唱，把小鬼叫到你身边", "tip": "直接打它，它一死小鬼全散",
+	},
+	"imp": {
+		"name": "小鬼", "hp": 14.0, "speed": 46.0, "damage": 4.0, "attack_cd": 0.8,
+		"coins": 1, "score": 3, "hit_r": 4.5, "center": 5.0, "knock_res": 0.0, "aggro": 170.0,
+		"blood": "#5a2a8a", "desc": "召唤者叫来的骷髅", "tip": "看到紫圈就走开",
+	},
+	"screamer": {
+		"name": "尖叫者", "hp": 50.0, "speed": 31.0, "damage": 5.0, "attack_cd": 1.0,
+		"coins": 10, "score": 50, "hit_r": 6.0, "center": 9.0, "knock_res": 0.1, "aggro": 150.0,
+		"blood": "#8c1c4c", "elite": true,
+		"desc": "尖叫让周围僵尸加速冲向你或基地", "tip": "蓄力时发抖，趁机打断或击杀",
+	},
+	"balloon": {
+		"name": "气球僵尸", "hp": 38.0, "speed": 32.0, "damage": 16.0, "attack_cd": 2.6,
+		"coins": 9, "score": 40, "hit_r": 9.0, "center": 28.0, "knock_res": 0.0, "aggro": 190.0,
+		"blood": "#8c1c1c", "flying": true, "elite": true,
+		"desc": "飘过围墙，在头顶投下毒弹", "tip": "打爆气球会摔下一只半血僵尸",
 	},
 	"boss": {
 		"name": "屠夫", "hp": 950.0, "speed": 21.0, "damage": 30.0, "attack_cd": 1.3,
-		"coins": 120, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
-		"blood": "#6e1414",
+		"coins": 150, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
+		"blood": "#6e1414", "is_boss": true,
+	},
+	"plague": {
+		"name": "瘟疫母体", "hp": 1300.0, "speed": 19.0, "damage": 26.0, "attack_cd": 1.5,
+		"coins": 260, "score": 1200, "hit_r": 16.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
+		"blood": "#5e8a20", "is_boss": true,
+	},
+	"overlord": {
+		"name": "尸王", "hp": 2600.0, "speed": 22.0, "damage": 32.0, "attack_cd": 1.3,
+		"coins": 500, "score": 3000, "hit_r": 18.0, "center": 20.0, "knock_res": 0.98, "aggro": 170.0,
+		"blood": "#4a2a6a", "is_boss": true,
 	},
 }
 
-## 手工设计的 15 波节奏，每 5 波一个 Boss 关。
+## Boss 的阶段表。at 是进入该阶段的血量比例，moves 是招式池，enter 是一进阶段就放的招。
+## 招式实现见 boss_brain.gd。
+const BOSSES := {
+	"boss": {
+		"title": "屠夫", "warn": "看到红色通道就侧向闪开", "trophy": "heart", "drops": ["armor", "ammo_crate", "damage"],
+		"phases": [
+			{"at": 1.0, "name": "屠刀", "sub": "", "speed": 1.0, "gap": [2.4, 3.4], "rocks": 3, "moves": ["charge", "slam", "rocks"]},
+			{"at": 0.5, "name": "狂怒", "sub": "连环冲撞，还叫来了帮手", "speed": 1.35, "gap": [1.5, 2.3], "rocks": 5, "tint": "#ffa8a0",
+				"enter": "call", "call": ["runner", "runner", "exploder"], "moves": ["charge2", "slam", "rocks", "call"]},
+		],
+	},
+	"plague": {
+		"title": "瘟疫母体", "warn": "毒雾会缓慢掉血，离开绿圈", "trophy": "serum", "drops": ["medkit", "inf_ammo", "armor"], "shield": 0.16,
+		"phases": [
+			{"at": 1.0, "name": "孢子", "sub": "", "speed": 1.0, "gap": [2.2, 3.2], "call": ["splitling", "splitling", "spitter"], "moves": ["fog", "fan", "call"]},
+			{"at": 0.55, "name": "脓盾", "sub": "先打破绿色护盾，再打本体", "speed": 0.9, "gap": [1.7, 2.6], "tint": "#d8ffa0",
+				"enter": "shield", "call": ["splitter", "spitter", "screamer"], "moves": ["fogring", "fog", "fan", "shield", "call"]},
+		],
+	},
+	"overlord": {
+		"title": "尸王", "warn": "这是最后一战，它会用尽所有手段", "trophy": "crown", "final": true, "drops": ["nuke", "damage", "armor"], "shield": 0.1, "slam_scale": 1.25,
+		"elites": ["stalker", "shielder", "splitter", "summoner", "screamer", "balloon"],
+		"phases": [
+			{"at": 1.0, "name": "围城", "sub": "", "speed": 1.0, "gap": [2.2, 3.2], "rocks": 5, "moves": ["charge", "slam", "rocks"]},
+			{"at": 0.75, "name": "亡者号令", "sub": "精英活着时本体大幅减伤，先清精英", "speed": 1.0, "gap": [2.0, 3.0], "rocks": 5, "guard": 0.45, "tint": "#d8c0ff",
+				"enter": "elites", "moves": ["elites", "charge", "rocks", "wave"]},
+			{"at": 0.5, "name": "瘟疫之息", "sub": "毒雾、护盾和全场尖叫", "speed": 1.1, "gap": [1.7, 2.5], "tint": "#d0ffb0",
+				"enter": "shield", "moves": ["fog", "fan", "fogring", "scream", "wave", "shield"]},
+			{"at": 0.25, "name": "末日狂暴", "sub": "落石如雨，别停下", "speed": 1.4, "gap": [1.2, 1.9], "rocks": 7, "tint": "#ff9090",
+				"enter": "storm", "moves": ["charge2", "storm", "wave", "slam", "elites", "fog"]},
+		],
+	},
+}
+
+## 特殊波的数值：酸雨每隔几秒落几滴。
+const ACID_RAIN_GAP := 3.2
+const ACID_RAIN_COUNT := 3
+const ACID_RAIN_DAMAGE := 10.0
+
+## 手工设计的 15 波节奏：新敌人逐波登场，第 5、10、15 波是 Boss 阶段战，第 8、12 波是特殊波。
 const WAVES := [
 	{"name": "先头部队", "walker": 9},
 	{"name": "脚步渐近", "walker": 12, "runner": 3},
 	{"name": "毒液来袭", "walker": 13, "runner": 4, "spitter": 2},
-	{"name": "会爆炸的家伙", "walker": 14, "runner": 5, "spitter": 2, "exploder": 3},
-	{"name": "屠夫现身", "walker": 10, "runner": 5, "exploder": 2, "boss": 1},
-	{"name": "快跑潮", "walker": 8, "runner": 24, "exploder": 2},
-	{"name": "铁壁", "walker": 18, "runner": 6, "spitter": 3, "tank": 2},
-	{"name": "酸雨", "walker": 18, "runner": 8, "spitter": 8, "exploder": 3, "tank": 1},
-	{"name": "火药桶", "walker": 16, "runner": 12, "exploder": 12, "tank": 2},
-	{"name": "屠夫归来", "walker": 22, "runner": 12, "spitter": 5, "exploder": 5, "tank": 2, "boss": 1},
-	{"name": "黑夜降临", "walker": 34, "runner": 20, "spitter": 7, "exploder": 7, "tank": 4},
-	{"name": "钢铁洪流", "walker": 24, "runner": 16, "spitter": 7, "exploder": 7, "tank": 8},
-	{"name": "尸潮", "walker": 52, "runner": 32, "spitter": 9, "exploder": 10, "tank": 5},
-	{"name": "绝望之墙", "walker": 32, "runner": 24, "spitter": 11, "exploder": 12, "tank": 8},
-	{"name": "最终围城", "walker": 38, "runner": 30, "spitter": 11, "exploder": 12, "tank": 6, "boss": 2},
+	{"name": "会爆炸的家伙", "walker": 12, "runner": 5, "spitter": 2, "exploder": 3, "splitter": 2},
+	{"name": "屠夫现身", "walker": 8, "runner": 4, "exploder": 2, "boss": 1},
+	{"name": "暗处的眼睛", "walker": 10, "runner": 16, "exploder": 2, "stalker": 3},
+	{"name": "铁壁", "walker": 14, "runner": 6, "spitter": 3, "tank": 2, "shielder": 3},
+	{"name": "酸雨", "walker": 16, "runner": 8, "spitter": 7, "exploder": 3, "tank": 1, "splitter": 3, "special": "acid_rain", "hint": "天上在下酸雨，看到地上的红圈就走开"},
+	{"name": "火药桶", "walker": 14, "runner": 10, "exploder": 10, "tank": 2, "summoner": 2},
+	{"name": "瘟疫母体", "walker": 16, "runner": 8, "spitter": 3, "exploder": 3, "tank": 1, "splitter": 2, "screamer": 1, "plague": 1},
+	{"name": "黑夜降临", "walker": 28, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "screamer": 3, "balloon": 2},
+	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 8, "special": "blackout", "hint": "全城断电，潜伏者最爱这种夜晚"},
+	{"name": "尸潮", "walker": 42, "runner": 26, "spitter": 7, "exploder": 8, "tank": 4, "splitter": 5, "balloon": 4, "screamer": 2},
+	{"name": "绝望之墙", "walker": 24, "runner": 18, "spitter": 8, "exploder": 8, "tank": 6, "shielder": 8, "summoner": 3, "screamer": 3, "balloon": 3},
+	{"name": "最终围城", "walker": 22, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "shielder": 3, "stalker": 3, "overlord": 1},
 ]
 
 
@@ -227,9 +333,11 @@ func upgrade_cost(id: String, level: int) -> int:
 
 ## 掷一次击杀掉落，返回掉落表里的一项，没掉东西返回空字典。
 func roll_drop(zombie_kind: String) -> Dictionary:
-	if zombie_kind == "boss":
+	if is_boss(zombie_kind):
 		return {"item": BOSS_DROPS[randi() % BOSS_DROPS.size()]}
 	var mult := 2.0 if zombie_kind == "tank" else 1.0
+	if bool(ZOMBIES[zombie_kind].get("elite", false)):
+		mult = ELITE_DROP_MULT
 	var roll := randf()
 	for entry: Dictionary in DROPS:
 		roll -= float(entry["chance"]) * mult
@@ -242,16 +350,29 @@ func roll_drop(zombie_kind: String) -> Dictionary:
 func build_spawn_queue(wave: int) -> Array[String]:
 	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
 	var queue: Array[String] = []
-	for kind in ZOMBIES.keys():
-		if kind == "boss":
+	for kind: String in ZOMBIES.keys():
+		if is_boss(kind):
 			continue
 		for i in int(cfg.get(kind, 0)):
 			queue.append(kind)
 	queue.shuffle()
-	for i in int(cfg.get("boss", 0)):
-		var at := queue.size() / 2 + i * 12
-		queue.insert(mini(at, queue.size()), "boss")
+	for kind: String in BOSSES.keys():
+		for i in int(cfg.get(kind, 0)):
+			var at := queue.size() / 2 + i * 12
+			queue.insert(mini(at, queue.size()), kind)
 	return queue
+
+
+func is_boss(kind: String) -> bool:
+	return bool(ZOMBIES[kind].get("is_boss", false))
+
+
+func wave_special(wave: int) -> String:
+	return String(WAVES[clampi(wave - 1, 0, WAVES.size() - 1)].get("special", ""))
+
+
+func wave_hint(wave: int) -> String:
+	return String(WAVES[clampi(wave - 1, 0, WAVES.size() - 1)].get("hint", ""))
 
 
 func wave_name(wave: int) -> String:

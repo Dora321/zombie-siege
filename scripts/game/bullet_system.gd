@@ -126,6 +126,11 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 	if best != null:
 		var dir := b.vel.normalized()
 		var damage: float = b.damage
+		# 护盾兵正面：子弹停在盾上，只磨耐久
+		if best.blocks_shot(dir):
+			best.shield_hit(damage)
+			game.fx.spark(best.center() - dir * float(best.hit_r))
+			return false
 		# 炮塔打被冻僵尸有额外加成，鼓励玩家先控场再让炮塔收割
 		if not b.from_player:
 			damage *= best.vulnerability()
@@ -187,6 +192,14 @@ func _update_pools(dt: float) -> void:
 		elif player != null and player.alive and player.position.distance_squared_to(p.pos) < p.r * p.r:
 			player.take_dot(ACID_DPS * dt)
 		i -= 1
+
+
+func add_pool(pos: Vector2, r: float, seconds: float) -> void:
+	var p := Pool.new()
+	p.pos = pos
+	p.r = r
+	p.t = seconds
+	pools.append(p)
 
 
 func clear_hazards() -> void:
