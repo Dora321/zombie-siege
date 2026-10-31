@@ -13,7 +13,7 @@ const MAX_WALL_TIER := 4
 
 
 static func turret_cost(g: Node) -> int:
-	return 110 + g.turrets.size() * 45
+	return 110 + g.turrets.size() * 50
 
 
 static func items(g: Node) -> Array:
@@ -55,13 +55,13 @@ static func items(g: Node) -> Array:
 	out.append({
 		"id": "reinforce", "tab": TAB_DEFENSE, "name": "加固围墙 Lv%d" % (tier + 1),
 		"desc": "已满级" if tier >= MAX_WALL_TIER else "围墙耐久 +30%",
-		"cost": 0 if tier >= MAX_WALL_TIER else 90 * (tier + 1), "locked": tier >= MAX_WALL_TIER,
+		"cost": 0 if tier >= MAX_WALL_TIER else 100 * (tier + 1), "locked": tier >= MAX_WALL_TIER,
 	})
 	var base_missing: float = g.base.max_hp - g.base.hp
 	out.append({
 		"id": "base_repair", "tab": TAB_DEFENSE, "name": "抢修基地 +150",
 		"desc": "基地 %d/%d" % [roundi(g.base.hp), roundi(g.base.max_hp)],
-		"cost": 70, "locked": base_missing < 1.0,
+		"cost": 75, "locked": base_missing < 1.0,
 	})
 	var maxed_turrets: bool = g.turrets.size() >= MAX_TURRETS
 	out.append({
@@ -73,13 +73,13 @@ static func items(g: Node) -> Array:
 	out.append({
 		"id": "turret_up", "tab": TAB_DEFENSE, "name": "升级炮塔 Lv%d" % tlvl,
 		"desc": "已满级" if tlvl >= MAX_TURRET_LEVEL else "伤害射速射程提升",
-		"cost": 0 if tlvl >= MAX_TURRET_LEVEL else 130 * tlvl, "locked": tlvl >= MAX_TURRET_LEVEL,
+		"cost": 0 if tlvl >= MAX_TURRET_LEVEL else 140 * tlvl, "locked": tlvl >= MAX_TURRET_LEVEL,
 	})
 	# 补给
 	out.append({
 		"id": "heal", "tab": TAB_SUPPLY, "name": "急救包 +50",
 		"desc": "生命 %d/%d" % [roundi(p.hp), roundi(p.max_hp)],
-		"cost": 40, "locked": p.hp >= p.max_hp,
+		"cost": 45, "locked": p.hp >= p.max_hp,
 	})
 	var hp_ups: int = g.purchases.get("max_hp", 0)
 	out.append({

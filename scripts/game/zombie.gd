@@ -94,7 +94,7 @@ func setup(g: Node, m: Node2D, zombie_kind: String, pos: Vector2, wave: int) -> 
 	_stat = GameData.ZOMBIES[kind]
 	max_hp = float(_stat["hp"]) * GameData.hp_scale(wave)
 	hp = max_hp
-	_speed = float(_stat["speed"]) * randf_range(0.88, 1.12) * (1.0 + (wave - 1) * 0.012)
+	_speed = float(_stat["speed"]) * randf_range(0.88, 1.12) * GameData.speed_scale(wave)
 	_damage = float(_stat["damage"]) * GameData.damage_scale(wave)
 	_attack_cd = float(_stat["attack_cd"])
 	_knock_res = float(_stat["knock_res"])

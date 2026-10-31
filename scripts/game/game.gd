@@ -19,7 +19,7 @@ const COMBO_WINDOW := 2.6
 ## 召唤物和分裂小怪可以稍微超过同屏上限，免得分裂体死了没有小怪。
 const MINION_OVERFLOW := 15
 ## Boss 在场时普通僵尸出得慢一些，把注意力留给 Boss。
-const BOSS_SPAWN_SLOW := 2.0
+const BOSS_SPAWN_SLOW := 1.8
 const BOSS_DOWN_HOLD := 2.2
 
 @onready var map: Node2D = $Map

@@ -96,8 +96,8 @@ const BURN_DPS := 8.0
 ## 道具：按顺序排在快捷栏。pack 是商店一次买几个，max 是最多带几个，start 是开局自带。
 const ITEM_ORDER: Array[String] = ["medkit", "armor", "frag", "sticky", "flash", "decoy", "ammo_crate", "inf_ammo", "speed", "damage", "nuke"]
 const ITEMS := {
-	"medkit": {"name": "医疗包", "desc": "生命 +50，战斗中随时用", "cost": 45, "pack": 1, "max": 5, "start": 1, "power": 50.0},
-	"armor": {"name": "护甲板", "desc": "护甲 +50，先于生命扣", "cost": 60, "pack": 1, "max": 3, "start": 0, "power": 50.0},
+	"medkit": {"name": "医疗包", "desc": "生命 +50，战斗中随时用", "cost": 50, "pack": 1, "max": 5, "start": 1, "power": 50.0},
+	"armor": {"name": "护甲板", "desc": "护甲 +50，先于生命扣", "cost": 65, "pack": 1, "max": 3, "start": 0, "power": 50.0},
 	"frag": {"name": "手雷", "desc": "朝准星扔，落地爆炸", "cost": 40, "pack": 2, "max": 8, "start": 2, "power": 38.0, "radius": 44.0},
 	"sticky": {"name": "粘性炸弹", "desc": "粘在僵尸身上，延时重伤", "cost": 35, "pack": 1, "max": 6, "start": 0, "power": 70.0, "radius": 40.0},
 	"flash": {"name": "闪光弹", "desc": "大范围眩晕，Boss 只晕一下", "cost": 30, "pack": 1, "max": 5, "start": 0, "power": 2.6, "radius": 110.0},
@@ -106,7 +106,7 @@ const ITEMS := {
 	"inf_ammo": {"name": "无限弹药", "desc": "10 秒内不耗弹不换弹", "cost": 70, "pack": 1, "max": 3, "start": 0, "power": 10.0},
 	"speed": {"name": "速度药水", "desc": "12 秒内移速 +40%", "cost": 45, "pack": 1, "max": 3, "start": 0, "power": 12.0},
 	"damage": {"name": "伤害药水", "desc": "12 秒内武器伤害 +60%", "cost": 60, "pack": 1, "max": 3, "start": 0, "power": 12.0},
-	"nuke": {"name": "核弹", "desc": "每波限 1 次，清屏重创 Boss", "cost": 350, "pack": 1, "max": 2, "start": 0, "power": 1.0},
+	"nuke": {"name": "核弹", "desc": "每波限 1 次，清屏重创 Boss", "cost": 400, "pack": 1, "max": 2, "start": 0, "power": 1.0},
 }
 const THROW_RANGE := 160.0
 const ARMOR_MAX := 100.0
@@ -117,8 +117,8 @@ const ITEM_OVERFLOW_COINS := 10
 
 ## 击杀掉落：按顺序掷一次，互斥。坦克概率翻倍，精英 1.5 倍，Boss 必掉。
 const DROPS: Array[Dictionary] = [
-	{"kind": "ammo", "chance": 0.045},
-	{"kind": "med", "chance": 0.02},
+	{"kind": "ammo", "chance": 0.04},
+	{"kind": "med", "chance": 0.016},
 	{"item": "frag", "chance": 0.014},
 	{"item": "medkit", "chance": 0.007},
 	{"item": "armor", "chance": 0.007},
@@ -147,44 +147,44 @@ const TROPHY_SCORE := 3000
 ## desc 和 tip 是图鉴文案，is_boss 的配置在 BOSSES。
 const ZOMBIES := {
 	"walker": {
-		"name": "普通僵尸", "hp": 34.0, "speed": 27.0, "damage": 7.0, "attack_cd": 0.95,
+		"name": "普通僵尸", "hp": 35.0, "speed": 28.0, "damage": 7.5, "attack_cd": 0.95,
 		"coins": 3, "score": 10, "hit_r": 6.0, "center": 7.0, "knock_res": 0.0, "aggro": 85.0,
 		"blood": "#8c1c1c", "desc": "速度慢，数量多", "tip": "手枪和炮塔就能处理",
 	},
 	"runner": {
-		"name": "快跑僵尸", "hp": 18.0, "speed": 62.0, "damage": 5.0, "attack_cd": 0.55,
+		"name": "快跑僵尸", "hp": 18.0, "speed": 64.0, "damage": 5.5, "attack_cd": 0.55,
 		"coins": 3, "score": 15, "hit_r": 5.5, "center": 6.0, "knock_res": 0.0, "aggro": 130.0,
 		"blood": "#8c1c1c", "desc": "血薄跑得快，老远就盯上你", "tip": "冲锋枪扫，别被围",
 	},
 	"tank": {
-		"name": "坦克僵尸", "hp": 240.0, "speed": 18.0, "damage": 22.0, "attack_cd": 1.25,
+		"name": "坦克僵尸", "hp": 250.0, "speed": 19.0, "damage": 24.0, "attack_cd": 1.25,
 		"coins": 14, "score": 60, "hit_r": 11.0, "center": 11.0, "knock_res": 0.85, "aggro": 90.0,
 		"blood": "#6e1414", "desc": "血厚不吃击退，拆墙伤害翻倍", "tip": "集火，引去炸药桶",
 	},
 	"exploder": {
-		"name": "自爆僵尸", "hp": 26.0, "speed": 38.0, "damage": 42.0, "attack_cd": 1.0,
+		"name": "自爆僵尸", "hp": 27.0, "speed": 40.0, "damage": 44.0, "attack_cd": 1.0,
 		"coins": 6, "score": 25, "hit_r": 8.0, "center": 8.0, "knock_res": 0.2, "aggro": 110.0,
 		"blood": "#7f9c20", "desc": "碰到东西 0.5 秒后爆炸", "tip": "远距离打死，还能炸到同类",
 	},
 	"spitter": {
-		"name": "喷吐僵尸", "hp": 36.0, "speed": 24.0, "damage": 9.0, "attack_cd": 2.4,
+		"name": "喷吐僵尸", "hp": 37.0, "speed": 25.0, "damage": 9.5, "attack_cd": 2.4,
 		"coins": 6, "score": 30, "hit_r": 6.0, "center": 7.0, "knock_res": 0.0, "aggro": 150.0,
 		"blood": "#4c8a2a", "range": 135.0, "desc": "远程吐酸越过围墙，留下酸液池", "tip": "优先击杀，别站在酸液里",
 	},
 	"stalker": {
-		"name": "潜伏者", "hp": 46.0, "speed": 40.0, "damage": 24.0, "attack_cd": 1.4,
+		"name": "潜伏者", "hp": 48.0, "speed": 41.0, "damage": 27.0, "attack_cd": 1.4,
 		"coins": 8, "score": 45, "hit_r": 5.5, "center": 8.0, "knock_res": 0.1, "aggro": 260.0,
 		"blood": "#4a2a6a", "melee": 0.4, "elite": true,
 		"desc": "半透明摸到身边，现身后猛扑一口", "tip": "留意地上的扭曲，一闪红就冲刺躲开",
 	},
 	"shielder": {
-		"name": "护盾兵", "hp": 72.0, "speed": 23.0, "damage": 11.0, "attack_cd": 1.1,
+		"name": "护盾兵", "hp": 75.0, "speed": 24.0, "damage": 12.0, "attack_cd": 1.1,
 		"coins": 10, "score": 45, "hit_r": 7.0, "center": 9.0, "knock_res": 0.7, "aggro": 120.0,
 		"blood": "#8c1c1c", "shield": 70.0, "elite": true,
 		"desc": "盾牌挡下正面子弹，盾转得慢", "tip": "绕后，或用爆炸、火焰、电弧、眩晕",
 	},
 	"splitter": {
-		"name": "分裂体", "hp": 80.0, "speed": 25.0, "damage": 9.0, "attack_cd": 1.0,
+		"name": "分裂体", "hp": 84.0, "speed": 26.0, "damage": 10.0, "attack_cd": 1.0,
 		"coins": 7, "score": 35, "hit_r": 9.0, "center": 9.0, "knock_res": 0.3, "aggro": 90.0,
 		"blood": "#6a9c30", "split": 3, "elite": true,
 		"desc": "死后裂成 2~3 只快跑的小怪", "tip": "留一发范围武器收拾小怪",
@@ -195,7 +195,7 @@ const ZOMBIES := {
 		"blood": "#6a9c30", "desc": "分裂体死后的碎块", "tip": "一枪一只",
 	},
 	"summoner": {
-		"name": "召唤者", "hp": 60.0, "speed": 21.0, "damage": 6.0, "attack_cd": 1.2,
+		"name": "召唤者", "hp": 62.0, "speed": 22.0, "damage": 7.0, "attack_cd": 1.2,
 		"coins": 12, "score": 60, "hit_r": 6.5, "center": 10.0, "knock_res": 0.1, "aggro": 170.0,
 		"blood": "#5a2a8a", "elite": true,
 		"desc": "躲在远处吟唱，把小鬼叫到你身边", "tip": "直接打它，它一死小鬼全散",
@@ -206,29 +206,29 @@ const ZOMBIES := {
 		"blood": "#5a2a8a", "desc": "召唤者叫来的骷髅", "tip": "看到紫圈就走开",
 	},
 	"screamer": {
-		"name": "尖叫者", "hp": 50.0, "speed": 31.0, "damage": 5.0, "attack_cd": 1.0,
+		"name": "尖叫者", "hp": 52.0, "speed": 32.0, "damage": 6.0, "attack_cd": 1.0,
 		"coins": 10, "score": 50, "hit_r": 6.0, "center": 9.0, "knock_res": 0.1, "aggro": 150.0,
 		"blood": "#8c1c4c", "elite": true,
 		"desc": "尖叫让周围僵尸加速冲向你或基地", "tip": "蓄力时发抖，趁机打断或击杀",
 	},
 	"balloon": {
-		"name": "气球僵尸", "hp": 38.0, "speed": 32.0, "damage": 16.0, "attack_cd": 2.6,
+		"name": "气球僵尸", "hp": 40.0, "speed": 33.0, "damage": 18.0, "attack_cd": 2.6,
 		"coins": 9, "score": 40, "hit_r": 9.0, "center": 28.0, "knock_res": 0.0, "aggro": 190.0,
 		"blood": "#8c1c1c", "flying": true, "elite": true,
 		"desc": "飘过围墙，在头顶投下毒弹", "tip": "打爆气球会摔下一只半血僵尸",
 	},
 	"boss": {
-		"name": "屠夫", "hp": 950.0, "speed": 21.0, "damage": 30.0, "attack_cd": 1.3,
-		"coins": 150, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
+		"name": "屠夫", "hp": 1050.0, "speed": 22.0, "damage": 33.0, "attack_cd": 1.3,
+		"coins": 140, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
 		"blood": "#6e1414", "is_boss": true,
 	},
 	"plague": {
-		"name": "瘟疫母体", "hp": 1300.0, "speed": 19.0, "damage": 26.0, "attack_cd": 1.5,
-		"coins": 260, "score": 1200, "hit_r": 16.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
+		"name": "瘟疫母体", "hp": 1350.0, "speed": 20.0, "damage": 28.0, "attack_cd": 1.5,
+		"coins": 240, "score": 1200, "hit_r": 16.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
 		"blood": "#5e8a20", "is_boss": true,
 	},
 	"overlord": {
-		"name": "尸王", "hp": 2600.0, "speed": 22.0, "damage": 32.0, "attack_cd": 1.3,
+		"name": "尸王", "hp": 2700.0, "speed": 23.0, "damage": 36.0, "attack_cd": 1.3,
 		"coins": 500, "score": 3000, "hit_r": 18.0, "center": 20.0, "knock_res": 0.98, "aggro": 170.0,
 		"blood": "#4a2a6a", "is_boss": true,
 	},
@@ -240,16 +240,16 @@ const BOSSES := {
 	"boss": {
 		"title": "屠夫", "warn": "看到红色通道就侧向闪开", "trophy": "heart", "drops": ["armor", "ammo_crate", "damage"],
 		"phases": [
-			{"at": 1.0, "name": "屠刀", "sub": "", "speed": 1.0, "gap": [2.4, 3.4], "rocks": 3, "moves": ["charge", "slam", "rocks"]},
-			{"at": 0.5, "name": "狂怒", "sub": "连环冲撞，还叫来了帮手", "speed": 1.35, "gap": [1.5, 2.3], "rocks": 5, "tint": "#ffa8a0",
+			{"at": 1.0, "name": "屠刀", "sub": "", "speed": 1.0, "gap": [2.2, 3.1], "rocks": 3, "moves": ["charge", "slam", "rocks"]},
+			{"at": 0.5, "name": "狂怒", "sub": "连环冲撞，还叫来了帮手", "speed": 1.35, "gap": [1.4, 2.1], "rocks": 5, "tint": "#ffa8a0",
 				"enter": "call", "call": ["runner", "runner", "exploder"], "moves": ["charge2", "slam", "rocks", "call"]},
 		],
 	},
 	"plague": {
 		"title": "瘟疫母体", "warn": "毒雾会缓慢掉血，离开绿圈", "trophy": "serum", "drops": ["medkit", "inf_ammo", "armor"], "shield": 0.16,
 		"phases": [
-			{"at": 1.0, "name": "孢子", "sub": "", "speed": 1.0, "gap": [2.2, 3.2], "call": ["splitling", "splitling", "spitter"], "moves": ["fog", "fan", "call"]},
-			{"at": 0.55, "name": "脓盾", "sub": "先打破绿色护盾，再打本体", "speed": 0.9, "gap": [1.7, 2.6], "tint": "#d8ffa0",
+			{"at": 1.0, "name": "孢子", "sub": "", "speed": 1.0, "gap": [2.0, 3.0], "call": ["splitling", "splitling", "spitter"], "moves": ["fog", "fan", "call"]},
+			{"at": 0.55, "name": "脓盾", "sub": "先打破绿色护盾，再打本体", "speed": 0.9, "gap": [1.6, 2.4], "tint": "#d8ffa0",
 				"enter": "shield", "call": ["splitter", "spitter", "screamer"], "moves": ["fogring", "fog", "fan", "shield", "call"]},
 		],
 	},
@@ -257,43 +257,44 @@ const BOSSES := {
 		"title": "尸王", "warn": "这是最后一战，它会用尽所有手段", "trophy": "crown", "final": true, "drops": ["nuke", "damage", "armor"], "shield": 0.1, "slam_scale": 1.25,
 		"elites": ["stalker", "shielder", "splitter", "summoner", "screamer", "balloon"],
 		"phases": [
-			{"at": 1.0, "name": "围城", "sub": "", "speed": 1.0, "gap": [2.2, 3.2], "rocks": 5, "moves": ["charge", "slam", "rocks"]},
-			{"at": 0.75, "name": "亡者号令", "sub": "精英活着时本体大幅减伤，先清精英", "speed": 1.0, "gap": [2.0, 3.0], "rocks": 5, "guard": 0.45, "tint": "#d8c0ff",
+			{"at": 1.0, "name": "围城", "sub": "", "speed": 1.0, "gap": [2.0, 3.0], "rocks": 5, "moves": ["charge", "slam", "rocks"]},
+			{"at": 0.75, "name": "亡者号令", "sub": "精英活着时本体大幅减伤，先清精英", "speed": 1.0, "gap": [1.9, 2.8], "rocks": 5, "guard": 0.4, "tint": "#d8c0ff",
 				"enter": "elites", "moves": ["elites", "charge", "rocks", "wave"]},
-			{"at": 0.5, "name": "瘟疫之息", "sub": "毒雾、护盾和全场尖叫", "speed": 1.1, "gap": [1.7, 2.5], "tint": "#d0ffb0",
+			{"at": 0.5, "name": "瘟疫之息", "sub": "毒雾、护盾和全场尖叫", "speed": 1.1, "gap": [1.6, 2.3], "tint": "#d0ffb0",
 				"enter": "shield", "moves": ["fog", "fan", "fogring", "scream", "wave", "shield"]},
-			{"at": 0.25, "name": "末日狂暴", "sub": "落石如雨，别停下", "speed": 1.4, "gap": [1.2, 1.9], "rocks": 7, "tint": "#ff9090",
+			{"at": 0.25, "name": "末日狂暴", "sub": "落石如雨，别停下", "speed": 1.4, "gap": [1.1, 1.8], "rocks": 7, "tint": "#ff9090",
 				"enter": "storm", "moves": ["charge2", "storm", "wave", "slam", "elites", "fog"]},
 		],
 	},
 }
 
 ## 特殊波的数值：酸雨每隔几秒落几滴。
-const ACID_RAIN_GAP := 3.2
-const ACID_RAIN_COUNT := 3
-const ACID_RAIN_DAMAGE := 10.0
+const ACID_RAIN_GAP := 2.8
+const ACID_RAIN_COUNT := 4
+const ACID_RAIN_DAMAGE := 12.0
 
 ## 三张地图。布局见 map_layouts.gd（废墟街区在 world_map.gd 里程序生成）。
 ## coins 开局金币，base_scale 基地受伤系数，group 一批僵尸从同一方向来的数量（越小越容易被包抄），
-## group_grow 每隔几波多一只，look_gain 和 look_limit 控制镜头往准星方向看多远。
+## group_grow 每隔几波多一只，look_gain 和 look_limit 控制镜头往准星方向看多远，
+## count_scale 普通僵尸数量倍率（精英和 Boss 不变），spawn_pace 出怪间隔倍率（越小越密）。
 const MAP_ORDER: Array[String] = ["ruins", "parking", "alley"]
 const MAPS := {
 	"ruins": {
 		"name": "废墟街区", "tag": "攻守均衡", "ground": "grass", "tint": "#ffffff", "mini": "#14210f",
 		"desc": ["完整的围墙和四条大路，树和废车能挡子弹。", "僵尸一批批从一个方向来，攻守均衡。", "第一次玩选这里。"],
-		"coins": 130, "base_scale": 0.42, "group": [3, 5], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
+		"coins": 130, "base_scale": 0.31, "count_scale": 1.0, "spawn_pace": 1.0, "group": [3, 5], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
 		"preview": {"floor": "#4e7a3c", "road": "#3c3e46", "solid": "#2c3a22", "prop": "#2e5226"},
 	},
 	"parking": {
-		"name": "露天停车场", "tag": "开阔易被包抄 · 开局多 20 金币", "ground": "asphalt", "tint": "#fff4e0", "mini": "#23232a",
-		"desc": ["障碍少，视线开阔，镜头能看得更远，枪线通畅。", "只有四角矮墙，僵尸不断换方向，很容易被包抄。", "炮塔枪线好，但要四面都照顾到。"],
-		"coins": 150, "base_scale": 0.42, "group": [1, 2], "group_grow": 4, "look_gain": 0.42, "look_limit": 260.0,
+		"name": "露天停车场", "tag": "开阔易被包抄 · 尸群更多", "ground": "asphalt", "tint": "#fff4e0", "mini": "#23232a",
+		"desc": ["障碍少，视线开阔，镜头能看得更远，枪线通畅。", "只有四角矮墙，僵尸不断换方向，很容易被包抄。", "尸群更多，基地也更不经打，要四面都照顾到。"],
+		"coins": 120, "base_scale": 0.53, "count_scale": 1.15, "spawn_pace": 0.85, "group": [1, 2], "group_grow": 6, "look_gain": 0.42, "look_limit": 260.0,
 		"preview": {"floor": "#44464e", "road": "#44464e", "solid": "#26262c", "prop": "#a8a498"},
 	},
 	"alley": {
 		"name": "窄巷迷宫", "tag": "狭窄适合卡位 · 开局多 20 金币", "ground": "cobble", "tint": "#dce6ff", "mini": "#191c26",
 		"desc": ["楼房夹着两三格宽的巷子，僵尸排成长队来。", "一座炮塔卡住路口就很值，手雷和电弧也打得满。", "但小心被前后堵死，跑之前先看小地图。"],
-		"coins": 150, "base_scale": 0.42, "group": [4, 7], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
+		"coins": 150, "base_scale": 0.3, "count_scale": 0.88, "spawn_pace": 1.05, "group": [4, 7], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
 		"preview": {"floor": "#6a645c", "road": "#6a645c", "solid": "#2a2833", "prop": "#4a7a58"},
 	},
 }
@@ -306,17 +307,17 @@ const EVENTS := {
 	"night": {
 		"name": "夜战", "slot": "weather", "color": "#a8b4ff", "min_wave": 3, "skip": [11],
 		"sub": "只看得清身边和准星处；僵尸加速，但金币 +25%", "chip": "僵尸快 金币多",
-		"zombie_speed": 1.12, "coin_mult": 1.25, "tint": "#c8d0ff",
+		"zombie_speed": 1.18, "coin_mult": 1.25, "tint": "#c8d0ff",
 	},
 	"storm": {
 		"name": "暴雨", "slot": "weather", "color": "#80c8ff", "min_wave": 2,
 		"sub": "都走得慢，水洼打滑，爆炸变小；电弧枪伤害 +35%", "chip": "水洼滑 电弧强",
-		"zombie_speed": 0.88, "player_speed": 0.92, "splash": 0.8, "arc": 1.35, "pool_decay": 1.8, "tint": "#c0d4e8",
+		"zombie_speed": 0.92, "player_speed": 0.88, "splash": 0.75, "arc": 1.35, "pool_decay": 1.8, "tint": "#c0d4e8",
 	},
 	"fog": {
 		"name": "大雾", "slot": "weather", "color": "#d0d8d8", "min_wave": 3,
 		"sub": "看不远，炮塔射程变短；僵尸也更难发现你", "chip": "僵尸难发现你",
-		"aggro": 0.55, "turret_range": 0.8, "tint": "#e8ecec",
+		"aggro": 0.65, "turret_range": 0.7, "tint": "#e8ecec",
 	},
 	"airdrop": {
 		"name": "补给空投", "slot": "incident", "color": "#ffe060", "min_wave": 2, "warn_t": 3.0,
@@ -334,35 +335,35 @@ const EVENTS := {
 const EVENT_WEATHER_CHANCE := 0.4
 const EVENT_INCIDENT_CHANCE := 0.55
 ## 补给箱：落地后能留多久，开箱给多少钱。
-const CRATE_LIFE := 30.0
-const CRATE_COINS := 40
-const CRATE_COINS_PER_WAVE := 8
+const CRATE_LIFE := 25.0
+const CRATE_COINS := 35
+const CRATE_COINS_PER_WAVE := 7
 const CRATE_ITEMS: Array[String] = ["medkit", "armor", "frag", "sticky", "flash", "decoy", "ammo_crate", "inf_ammo", "speed", "damage"]
 ## 水洼：玩家打滑（加速度倍率），僵尸踩水再慢一点。
 const WET_TRACTION := 0.22
 const WET_ZOMBIE_SPEED := 0.8
 ## 电磁干扰：停火多久，之后过载多久、射速倍率。
-const EMP_JAM_TIME := 7.0
-const EMP_OVERCLOCK_TIME := 7.0
+const EMP_JAM_TIME := 9.0
+const EMP_OVERCLOCK_TIME := 5.0
 const EMP_OVERCLOCK_RATE := 0.6
 ## 先遣尸群：从本波队列里提前放多少只，倒计时加长多少秒。
-const VANGUARD_COUNT := 4
-const VANGUARD_EXTRA_TIME := 4.0
+const VANGUARD_COUNT := 6
+const VANGUARD_EXTRA_TIME := 3.0
 
 ## 手工设计的 15 波节奏：新敌人逐波登场，第 5、10、15 波是 Boss 阶段战，第 8、12 波是特殊波。
 const WAVES := [
-	{"name": "先头部队", "walker": 9},
-	{"name": "脚步渐近", "walker": 12, "runner": 3},
-	{"name": "毒液来袭", "walker": 13, "runner": 4, "spitter": 2},
-	{"name": "会爆炸的家伙", "walker": 12, "runner": 5, "spitter": 2, "exploder": 3, "splitter": 2},
-	{"name": "屠夫现身", "walker": 8, "runner": 4, "exploder": 2, "boss": 1},
-	{"name": "暗处的眼睛", "walker": 10, "runner": 16, "exploder": 2, "stalker": 3},
-	{"name": "铁壁", "walker": 14, "runner": 6, "spitter": 3, "tank": 2, "shielder": 3},
+	{"name": "先头部队", "walker": 10},
+	{"name": "脚步渐近", "walker": 13, "runner": 4},
+	{"name": "毒液来袭", "walker": 14, "runner": 5, "spitter": 3},
+	{"name": "会爆炸的家伙", "walker": 13, "runner": 5, "spitter": 2, "exploder": 4, "splitter": 2},
+	{"name": "屠夫现身", "walker": 8, "runner": 5, "exploder": 2, "boss": 1},
+	{"name": "暗处的眼睛", "walker": 10, "runner": 16, "exploder": 2, "stalker": 4},
+	{"name": "铁壁", "walker": 14, "runner": 7, "spitter": 3, "tank": 2, "shielder": 3},
 	{"name": "酸雨", "walker": 16, "runner": 8, "spitter": 7, "exploder": 3, "tank": 1, "splitter": 3, "special": "acid_rain", "hint": "天上在下酸雨，看到地上的红圈就走开"},
 	{"name": "火药桶", "walker": 14, "runner": 10, "exploder": 10, "tank": 2, "summoner": 2},
-	{"name": "瘟疫母体", "walker": 16, "runner": 8, "spitter": 3, "exploder": 3, "tank": 1, "splitter": 2, "screamer": 1, "plague": 1},
+	{"name": "瘟疫母体", "walker": 16, "runner": 8, "spitter": 3, "exploder": 3, "tank": 1, "splitter": 2, "screamer": 2, "plague": 1},
 	{"name": "黑夜降临", "walker": 28, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "screamer": 3, "balloon": 2},
-	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 8, "special": "blackout", "hint": "全城断电，潜伏者最爱这种夜晚"},
+	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 10, "special": "blackout", "hint": "全城断电，潜伏者最爱这种夜晚"},
 	{"name": "尸潮", "walker": 42, "runner": 26, "spitter": 7, "exploder": 8, "tank": 4, "splitter": 5, "balloon": 4, "screamer": 2},
 	{"name": "绝望之墙", "walker": 24, "runner": 18, "spitter": 8, "exploder": 8, "tank": 6, "shielder": 8, "summoner": 3, "screamer": 3, "balloon": 3},
 	{"name": "最终围城", "walker": 22, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "shielder": 3, "stalker": 3, "overlord": 1},
@@ -423,13 +424,18 @@ func roll_drop(zombie_kind: String) -> Dictionary:
 
 
 ## 把一波的配置展开成乱序的出怪队列；Boss 压轴在队列中段之后出现。
+## 当前地图的 count_scale 只缩放普通僵尸，精英是逐波设计好的。
 func build_spawn_queue(wave: int) -> Array[String]:
 	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
+	var scale := float(MAPS[Save.map_id]["count_scale"])
 	var queue: Array[String] = []
 	for kind: String in ZOMBIES.keys():
 		if is_boss(kind):
 			continue
-		for i in int(cfg.get(kind, 0)):
+		var count := int(cfg.get(kind, 0))
+		if not bool(ZOMBIES[kind].get("elite", false)):
+			count = roundi(count * scale)
+		for i in count:
 			queue.append(kind)
 	queue.shuffle()
 	for kind: String in BOSSES.keys():
@@ -460,15 +466,19 @@ func hp_scale(wave: int) -> float:
 
 
 func damage_scale(wave: int) -> float:
-	return 1.0 + (wave - 1) * 0.035
+	return 1.0 + (wave - 1) * 0.04
+
+
+func speed_scale(wave: int) -> float:
+	return 1.0 + (wave - 1) * 0.013
 
 
 func spawn_interval(wave: int) -> float:
-	return maxf(0.6, 1.6 - wave * 0.07)
+	return maxf(0.58, 1.58 - wave * 0.07) * float(MAPS[Save.map_id]["spawn_pace"])
 
 
 func wave_bonus(wave: int) -> int:
-	return 90 + wave * 30
+	return 88 + wave * 29
 
 
 func boss_wave(wave: int) -> bool:
