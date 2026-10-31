@@ -1,0 +1,256 @@
+extends Control
+## 战斗 HUD：血条、弹药、波次、小地图、公告和准星，全部用 _draw 绘制成像素风。
+
+const W := 480
+const H := 270
+const COL_HP := Color("#d83838")
+const COL_BASE := Color("#5a90d0")
+const COL_DIM := Color(0, 0, 0, 0.55)
+
+var game: Node
+var _title := ""
+var _sub := ""
+var _announce_t := 0.0
+var _announce_dur := 1.0
+var _hurt := 0.0
+var _alert_t := 0.0
+var _shown_coins := 0
+
+
+func setup(g: Node) -> void:
+	game = g
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func announce(title: String, sub: String, duration: float) -> void:
+	_title = title
+	_sub = sub
+	_announce_t = duration
+	_announce_dur = duration
+
+
+func flash_hurt() -> void:
+	_hurt = 0.35
+
+
+## 踩在酸液里时持续泛红，提醒玩家赶紧离开。
+func flash_dot() -> void:
+	_hurt = maxf(_hurt, 0.14)
+
+
+func alert_base() -> void:
+	_alert_t = 2.0
+
+
+func _process(dt: float) -> void:
+	_announce_t -= dt
+	_hurt = maxf(_hurt - dt, 0.0)
+	_alert_t = maxf(_alert_t - dt, 0.0)
+	if game != null:
+		_shown_coins = int(move_toward(_shown_coins, game.coins, maxf(1.0, dt * 200.0)))
+	queue_redraw()
+
+
+func _draw() -> void:
+	if game == null or game.player == null:
+		return
+	var in_shop: bool = game.state == game.State.SHOP
+	_draw_vignette()
+	if not in_shop:
+		_draw_status()
+		_draw_wave_info()
+		_draw_money()
+		_draw_weapons()
+		_draw_minimap()
+		_draw_base_pointer()
+	if _announce_t > 0.0 and not get_tree().paused:
+		_draw_announce()
+	if _alert_t > 0.0 and int(_alert_t * 5.0) % 2 == 0 and not in_shop:
+		Art.draw_text(self, "基地遭到攻击！", Vector2(W * 0.5, 44), 12, Color("#ff7050"), 1)
+	if game.state == game.State.PLACING:
+		_draw_placement()
+	elif game.player_can_act() and not get_tree().paused:
+		_draw_crosshair()
+
+
+func _bar(rect: Rect2, ratio: float, color: Color) -> void:
+	draw_rect(rect.grow(1), Color(0.05, 0.04, 0.06))
+	draw_rect(rect, Color(0.2, 0.18, 0.22))
+	var fill := rect
+	fill.size.x = roundf(rect.size.x * clampf(ratio, 0.0, 1.0))
+	draw_rect(fill, color)
+	draw_rect(Rect2(fill.position, Vector2(fill.size.x, 1)), color.lightened(0.3))
+
+
+func _draw_status() -> void:
+	var p: Variant = game.player
+	var b: Variant = game.base
+	draw_texture(Art.heart_tex, Vector2(4, 3))
+	_bar(Rect2(15, 5, 74, 6), p.hp / p.max_hp, COL_HP if p.hp > p.max_hp * 0.3 or int(game.time_alive * 6.0) % 2 == 0 else Color("#ff9070"))
+	Art.draw_tiny(self, "%d/%d" % [roundi(p.hp), roundi(p.max_hp)], Vector2(92, 5), Color("#ffb0a0"))
+	draw_texture(Art.shield_tex, Vector2(4, 14))
+	_bar(Rect2(15, 16, 74, 6), b.hp / b.max_hp, COL_BASE)
+	Art.draw_tiny(self, "%d/%d" % [roundi(b.hp), roundi(b.max_hp)], Vector2(92, 16), Color("#a0c8ff"))
+	# 冲刺冷却
+	var dash_ratio: float = 1.0 - clampf(p.dash_cd / p.dash_cd_base, 0.0, 1.0)
+	_bar(Rect2(15, 26, 36, 2), dash_ratio, Color("#60d0e0") if dash_ratio >= 1.0 else Color("#3a7a88"))
+
+
+func _draw_wave_info() -> void:
+	var left: int = game.zombies.size() + game._queue.size()
+	Art.draw_text(self, "第 %d / %d 波" % [game.wave, GameData.MAX_WAVE], Vector2(W * 0.5, 2), 12, Color("#f0ece0"), 1)
+	draw_texture(Art.skull_tex, Vector2(W * 0.5 - 18, 18))
+	Art.draw_tiny(self, str(left), Vector2(W * 0.5 - 7, 20), Color("#f0a090"))
+	if not game.boss_list.is_empty():
+		var boss: Variant = game.boss_list[0]
+		Art.draw_text(self, "屠夫", Vector2(W * 0.5 - 70, 28), 12, Color("#ff8060"), 2)
+		_bar(Rect2(W * 0.5 - 66, 32, 132, 5), boss.hp / boss.max_hp, Color("#c02828"))
+
+
+func _draw_money() -> void:
+	var coin: Texture2D = Art.coin_frames[0]
+	var txt := str(_shown_coins)
+	var tw := Art.tiny_width(txt, 2)
+	draw_texture(coin, Vector2(W - tw - 16, 3))
+	Art.draw_tiny(self, txt, Vector2(W - tw - 3, 5), Color(0, 0, 0, 0.8), 2)
+	Art.draw_tiny(self, txt, Vector2(W - tw - 4, 4), Color("#ffe060"), 2)
+	var score_txt := str(game.score)
+	Art.draw_text(self, "分数", Vector2(W - Art.tiny_width(score_txt) - 8, 14), 12, Color("#c8c4b8"), 2)
+	Art.draw_tiny(self, score_txt, Vector2(W - Art.tiny_width(score_txt) - 4, 19), Color("#f0ece0"))
+	if game.combo >= 3:
+		var ratio: float = clampf(game.combo_t / game.COMBO_WINDOW, 0.0, 1.0)
+		var label := "连杀 %d" % game.combo
+		Art.draw_text(self, label, Vector2(W - 24, 28), 12, Color("#ffb040"), 2)
+		Art.draw_tiny(self, "x%.1f" % game.combo_multiplier(), Vector2(W - 21, 33), Color("#ffb040"))
+		draw_rect(Rect2(W - 62, 42, 58.0 * ratio, 1), Color("#ffb040"))
+
+
+func _draw_weapons() -> void:
+	var p: Variant = game.player
+	var slot_w := 62
+	var total := slot_w * 3 + 8
+	var x0 := (W - total) / 2
+	var y0 := H - 24
+	for i in 3:
+		var id: String = GameData.WEAPON_ORDER[i]
+		var st: Dictionary = p.weapon_state[id]
+		var selected: bool = id == p.weapon_id
+		var rect := Rect2(x0 + i * (slot_w + 4), y0, slot_w, 21)
+		draw_rect(rect, Color(0.09, 0.08, 0.11, 0.86) if not selected else Color(0.28, 0.14, 0.11, 0.92))
+		draw_rect(rect, Color("#ffc050") if selected else Color("#55525c"), false, 1.0)
+		Art.draw_tiny(self, str(i + 1), rect.position + Vector2(3, 3), Color("#ffc050") if selected else Color("#a0a0a8"))
+		var gun: Dictionary = Art.guns[id]
+		var tex: Texture2D = gun["tex"]
+		draw_texture(tex, rect.position + Vector2(10, 2))
+		var mag: int = st["mag"]
+		var reserve: int = st["reserve"]
+		var ammo_txt := "%d/%s" % [mag, "--" if reserve < 0 else str(reserve)]
+		var ammo_col := Color("#f0ece0")
+		if mag == 0:
+			ammo_col = Color("#ff6050")
+		Art.draw_tiny(self, ammo_txt, rect.position + Vector2(3, 14), ammo_col)
+		Art.draw_tiny(self, "%d" % int(st["level"]), rect.position + Vector2(slot_w - 6, 3), Color("#70d080"))
+		if selected and p.reload_t > 0.0:
+			var ratio: float = 1.0 - p.reload_t / p.reload_total
+			draw_rect(Rect2(rect.position.x + 1, rect.end.y - 2, (slot_w - 2) * ratio, 1), Color("#f0d050"))
+
+
+func _draw_minimap() -> void:
+	var map: Variant = game.map
+	var mw: int = map.W
+	var mh: int = map.H
+	var origin := Vector2(W - mw - 3, H - mh - 3)
+	draw_rect(Rect2(origin - Vector2(1, 1), Vector2(mw + 2, mh + 2)), Color(0.75, 0.72, 0.65, 0.7), false, 1.0)
+	draw_rect(Rect2(origin, Vector2(mw, mh)), Color(0.08, 0.13, 0.08, 0.72))
+	var tile: int = map.TILE
+	for piece: Variant in map.pieces:
+		if piece.alive and piece.kind != "barrel":
+			var cell: int = piece.cell
+			var c := Color("#b0aca0") if piece.kind == "wall" else Color("#a07840")
+			draw_rect(Rect2(origin + Vector2(cell % mw, cell / mw), Vector2(1, 1)), c)
+	draw_rect(Rect2(origin + Vector2(map.BASE_X0, map.BASE_Y0), Vector2(4, 3)), COL_BASE)
+	for t: Variant in game.turrets:
+		draw_rect(Rect2(origin + (t.position / tile).floor(), Vector2(1, 1)), Color("#70e090"))
+	for z: Variant in game.zombies:
+		var col := Color("#ff4030") if z.kind != "boss" else Color("#ffe040")
+		draw_rect(Rect2(origin + (z.position / tile).floor(), Vector2(1, 1)), col)
+	var pp: Vector2 = game.player.position / tile
+	draw_rect(Rect2(origin + pp.floor() - Vector2(1, 1), Vector2(3, 3)), Color.WHITE)
+
+
+func _draw_base_pointer() -> void:
+	# 玩家跑远时，屏幕边缘指向基地
+	var cam: Vector2 = game.camera.position
+	var to: Vector2 = game.base.position - cam + Vector2(0, -24)
+	if absf(to.x) < W * 0.5 - 8 and absf(to.y) < H * 0.5 - 8:
+		return
+	var center := Vector2(W, H) * 0.5
+	var scale_x := (W * 0.5 - 24) / maxf(absf(to.x), 0.01)
+	var scale_y := (H * 0.5 - 40) / maxf(absf(to.y), 0.01)
+	var at := center + to * minf(scale_x, scale_y)
+	var dir := to.normalized()
+	var side := dir.orthogonal()
+	var tip := at + dir * 5.0
+	draw_colored_polygon(PackedVector2Array([tip, at + side * 3.0, at - side * 3.0]), COL_BASE)
+	draw_texture(Art.shield_tex, (at - dir * 9.0 - Vector2(4, 4)).round())
+
+
+func _draw_announce() -> void:
+	var alpha := clampf(_announce_t * 2.5, 0.0, 1.0)
+	var elapsed := _announce_dur - _announce_t
+	var pop := clampf(elapsed * 6.0, 0.0, 1.0)
+	var y := lerpf(58.0, 66.0, pop)
+	draw_rect(Rect2(0, y - 4, W, 42), Color(0, 0, 0, 0.5 * alpha))
+	draw_rect(Rect2(0, y - 4, W, 1), Color(1.0, 0.75, 0.3, 0.6 * alpha))
+	draw_rect(Rect2(0, y + 37, W, 1), Color(1.0, 0.75, 0.3, 0.6 * alpha))
+	Art.draw_text(self, _title, Vector2(W * 0.5, y), 24, Color(1.0, 0.85, 0.5, alpha), 1)
+	Art.draw_text(self, _sub, Vector2(W * 0.5, y + 22), 12, Color(0.92, 0.9, 0.84, alpha), 1)
+
+
+func _draw_vignette() -> void:
+	if _hurt <= 0.0:
+		return
+	var a := _hurt * 1.3
+	var c := Color(0.8, 0.05, 0.05, a * 0.6)
+	draw_rect(Rect2(0, 0, W, 10), c)
+	draw_rect(Rect2(0, H - 10, W, 10), c)
+	draw_rect(Rect2(0, 10, 10, H - 20), c)
+	draw_rect(Rect2(W - 10, 10, 10, H - 20), c)
+	c.a *= 0.5
+	draw_rect(Rect2(10, 10, W - 20, 6), c)
+	draw_rect(Rect2(10, H - 16, W - 20, 6), c)
+	draw_rect(Rect2(10, 16, 6, H - 32), c)
+	draw_rect(Rect2(W - 16, 16, 6, H - 32), c)
+
+
+func _draw_crosshair() -> void:
+	var m := get_viewport().get_mouse_position().round()
+	var p: Variant = game.player
+	var gap: float = 3.0 + float(p.fired_kick) * 3.0
+	var col := Color("#ff6050") if game.hit_marker_active() else Color("#f0ece0")
+	var shade := Color(0, 0, 0, 0.7)
+	for s: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		for k in 3:
+			var at: Vector2 = (m + s * (gap + k)).round()
+			draw_rect(Rect2(at + Vector2(1, 1), Vector2(1, 1)), shade)
+			draw_rect(Rect2(at, Vector2(1, 1)), col)
+	draw_rect(Rect2(m, Vector2(1, 1)), col)
+
+
+func _draw_placement() -> void:
+	var map: Variant = game.map
+	var world: Vector2 = game.get_global_mouse_position() + Vector2(0, 4)
+	var cell: int = map.cell_of(world)
+	var top_left: Vector2 = map.cell_top_left(cell)
+	var screen: Vector2 = top_left - game.camera.position - game.camera.offset + Vector2(W, H) * 0.5
+	var ok: bool = map.can_place_turret(cell)
+	var c := Color(0.3, 1.0, 0.5, 0.5) if ok else Color(1.0, 0.25, 0.2, 0.5)
+	draw_rect(Rect2(screen, Vector2(16, 16)), c)
+	draw_rect(Rect2(screen, Vector2(16, 16)), Color(c.r, c.g, c.b, 1.0), false, 1.0)
+	draw_texture(Art.turret_base_tex, screen + Vector2(0, 2), Color(1, 1, 1, 0.75))
+	var range_center := screen + Vector2(8, 8)
+	var r := 118.0 + 16.0 * (int(game.turret_level) - 1)
+	draw_arc(range_center, r, 0, TAU, 48, Color(c.r, c.g, c.b, 0.4), 1.0)
+	draw_rect(Rect2(0, 0, W, 34), COL_DIM)
+	Art.draw_text(self, "左键放置炮塔  右键或 Esc 取消  WASD 可走动", Vector2(W * 0.5, 3), 12, Color("#f0ece0"), 1)
+	Art.draw_text(self, "可放在任意空地，炮塔会挡路也会吸引僵尸", Vector2(W * 0.5, 18), 12, Color("#c8c4b8"), 1)

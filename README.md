@@ -1,0 +1,146 @@
+# 僵尸围城 Zombie Siege
+
+2D 像素风俯视角生存射击游戏。守住中央基地，撑过 15 波尸潮。
+
+**在线试玩：<https://dora321.github.io/zombie-siege/>**（电脑浏览器，键鼠操作）
+
+纯 GDScript 编写，所有像素图由代码生成（`Image` / `ImageTexture` / `_draw`），所有音效和背景音乐由代码合成（`AudioStreamWAV`）。唯一的外部素材是中文字体（见下方「字体」）。
+
+## 怎么运行
+
+1. 安装 Godot 4.7（标准版即可，不需要 .NET 版）。
+2. 打开 Godot，在项目管理器点「导入」，选择本目录下的 `project.godot`。
+3. 打开工程后按 **F5** 运行。
+
+也可以直接用命令行：
+
+```bash
+godot --path .
+```
+
+> 第一次用命令行运行前，建议先执行一次 `godot --headless --path . --import` 生成工程缓存。
+
+## 操作说明
+
+| 操作 | 按键 |
+| --- | --- |
+| 移动 | WASD 或方向键 |
+| 瞄准 / 射击 | 鼠标移动 / 按住左键 |
+| 换弹 | R（打空会自动换弹） |
+| 冲刺 | Shift 或空格（冲刺中无敌，有冷却） |
+| 切换武器 | 1 手枪 / 2 霰弹枪 / 3 冲锋枪，或滚轮 |
+| 暂停 | Esc 或 P |
+| 全屏 | F11 或 F（Mac 和浏览器里建议用 F） |
+| 炮塔放置 | 左键放置，右键或 Esc 取消，放置时可用 WASD 走动 |
+
+## 玩法
+
+- **胜利**：撑过全部 15 波。
+- **失败**：基地生命归零，**或**玩家生命归零，任意一个发生即结束。
+- **波次**：每波有名字和固定配置，第 5、10、15 波有 Boss「屠夫」。
+- **商店**：每波结束后自动打开，用金币购买：
+  - 武器：升级三把枪、买霰弹和冲锋枪弹药（手枪弹药无限）
+  - 防御：修复围墙路障（已摧毁的也能重建）、加固围墙、抢修基地、放置和升级炮塔
+  - 补给：急救包、防弹衣、跑鞋、冲刺训练、磁铁
+- **金币和掉落**：僵尸掉金币，偶尔掉弹药箱和医疗包，波次结束时自动飞向玩家。
+- **计分**：连杀提高分数倍率（最高 2 倍），受伤会中断连杀。每波结算时基地越完整奖励越高。
+- **排行榜**：前 5 名保存在本地，标题界面可查看和清除。
+
+### 僵尸图鉴
+
+| 种类 | 特点 | 对策 |
+| --- | --- | --- |
+| 普通僵尸 | 速度慢，数量多 | 手枪、炮塔 |
+| 快跑僵尸 | 血薄，速度快，老远就盯上你 | 冲锋枪，别被围 |
+| 坦克僵尸 | 血厚，几乎不吃击退，拆墙伤害翻倍 | 集火，引去炸药桶 |
+| 自爆僵尸 | 碰到东西 0.5 秒后爆炸 | 远距离打死，爆炸能炸到同类 |
+| 喷吐僵尸 | 远程吐酸，越过围墙，留下酸液池 | 优先击杀，别站在酸液里 |
+| 屠夫（Boss） | 血极厚，会朝你冲锋，能撞碎建筑 | 侧向冲刺躲开，再打它 |
+
+### 小技巧
+
+- 玩家可以穿过路障，僵尸不能。路障是你的出入口，也是僵尸优先啃的地方。
+- 红色炸药桶一枪就炸，把尸群引过去一网打尽，但别站太近。
+- 僵尸优先走围墙的缺口，一旦有墙被打穿，尸群都会往那里涌，记得修墙。
+- 切走窗口时游戏会自动暂停。
+
+## 工程结构
+
+```
+project.godot              工程配置（480x270 视口、整数缩放、最近邻过滤、输入映射）
+resources/pixel_theme.tres UI 主题
+resources/fonts/           内置中文像素字体子集及许可证
+tools/                     字体裁剪和网页发布脚本
+export_presets.cfg         Web 导出预设（关闭线程）
+scenes/
+  game.tscn                游戏主场景
+  entities/                玩家、僵尸、炮塔、基地、墙块
+  ui/                      标题、HUD、商店、暂停、结算
+scripts/
+  autoload/                全局单例
+    game_data.gd           武器、僵尸、波次数值表（调平衡改这里）
+    art.gd                 程序化像素美术
+    sfx.gd                 程序化音效和音乐
+    save.gd                本地存档
+    window_fit.gd          窗口自适应、全屏
+  game/
+    game.gd                状态机、波次导演、计分、屏幕震动、命中停顿
+    world_map.gd           地图生成、格子碰撞、流场寻路
+    player.gd zombie.gd turret.gd base_core.gd wall_piece.gd
+    bullet_system.gd       子弹、酸液弹、酸液池
+    fx_layer.gd            粒子、碎块、弹壳、枪口火光、爆炸、飘字
+    decal_layer.gd         血迹和弹壳永久残留
+    pickup_system.gd       掉落物
+    shop_catalog.gd        商品和购买规则
+  ui/                      各界面脚本
+  test/                    自动化测试（普通启动时不生效）
+```
+
+## 自动化测试
+
+```bash
+# 基础检查
+godot --headless --path . --import
+godot --headless --path . --quit-after 300
+
+# 流程测试：走完标题、战斗、商店、暂停、结算、通关等全部流程，并逐项校验
+godot --headless --path . --fixed-fps 60 -- --flowtest --seed=1
+
+# 机器人打一局并打印成绩和性能（--skill 为瞄准水平 0~1）
+godot --headless --path . --fixed-fps 60 -- --bot --seed=3 --skill=0.75
+
+# 无敌机器人打完全部 15 波，用于检查后期波次和软锁
+godot --headless --path . --fixed-fps 60 -- --bot --seed=3 --god --godbase
+```
+
+带测试参数启动时，成绩写入单独的 `zombie_siege_test.cfg`，不影响玩家的排行榜。
+
+## 存档位置
+
+macOS：`~/Library/Application Support/Godot/app_userdata/僵尸围城 Zombie Siege/zombie_siege.cfg`
+
+网页版：浏览器的 IndexedDB（清除网站数据会丢失排行榜）。
+
+## 网页版
+
+需要先安装 Godot 4.7.2 的 Web 导出模板。导出时关闭了线程支持，所以不需要 COOP/COEP 响应头，可以直接放在 GitHub Pages 这类静态托管上。
+
+```bash
+# 只导出
+godot --headless --path . --export-release "Web" build/web/index.html
+# 导出并发布到 gh-pages 分支
+tools/deploy_pages.sh
+```
+
+## 字体
+
+界面字体是 [缝合像素字体 Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) 12px 简中版的子集，以 SIL OFL 1.1 授权，许可证见 `resources/fonts/`。文字都用 12px 的整数倍字号，这样才清晰。
+
+改了界面文案后要重新裁剪，否则新字会显示成方框：
+
+```bash
+pip install fonttools
+python3 tools/build_font.py 完整字体路径/fusion-pixel-12px-proportional-zh_hans.ttf
+# 校验所有用到的字都有字形
+godot --headless --path . -- --fontcheck=$PWD/tools/font_chars.txt
+```

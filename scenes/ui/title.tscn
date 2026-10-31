@@ -1,0 +1,136 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/title_menu.gd" id="1"]
+
+[node name="Title" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Menu" type="VBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 108.0
+offset_right = 200.0
+offset_bottom = 218.0
+theme_override_constants/separation = 5
+
+[node name="StartButton" type="Button" parent="Menu"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+text = "开始游戏"
+
+[node name="HelpButton" type="Button" parent="Menu"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+text = "操作说明"
+
+[node name="ClearButton" type="Button" parent="Menu"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+text = "清除记录"
+
+[node name="QuitButton" type="Button" parent="Menu"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+text = "退出游戏"
+
+[node name="ScoresPanel" type="PanelContainer" parent="."]
+layout_mode = 0
+offset_left = 250.0
+offset_top = 104.0
+offset_right = 430.0
+offset_bottom = 214.0
+
+[node name="ScoresLabel" type="Label" parent="ScoresPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+
+[node name="Hint" type="Label" parent="."]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 250.0
+offset_right = 480.0
+offset_bottom = 268.0
+theme_override_colors/font_color = Color(0.75, 0.73, 0.68, 1)
+theme_override_font_sizes/font_size = 12
+text = "守住中央基地，撑过 15 波尸潮"
+horizontal_alignment = 1
+
+[node name="HelpPanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 50.0
+offset_top = 16.0
+offset_right = 430.0
+offset_bottom = 254.0
+
+[node name="VBox" type="VBoxContainer" parent="HelpPanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HelpTitle" type="Label" parent="HelpPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.45, 1)
+text = "操作说明"
+horizontal_alignment = 1
+
+[node name="HelpText" type="Label" parent="HelpPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 12
+text = "WASD 移动    鼠标瞄准    左键射击    R 换弹
+Shift 或空格 冲刺（无敌、有冷却）
+1 / 2 / 3 或滚轮 切换 手枪 / 霰弹枪 / 冲锋枪
+Esc 或 P 暂停    F11 或 F 全屏
+
+目标：守住中央基地，撑过 15 波即胜利
+失败：基地被摧毁，或玩家生命归零
+波次之间打开商店，用金币修墙、升级武器、
+买弹药、放炮塔。玩家可穿过路障，僵尸不行
+红色炸药桶一枪就炸，引怪过去一网打尽！
+自爆僵尸要远距离打死，别让它碰到围墙"
+
+[node name="HelpClose" type="Button" parent="HelpPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+text = "知道了"
+
+[node name="ClickGate" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_right = 480.0
+offset_bottom = 270.0
+color = Color(0.05, 0.03, 0.06, 0.93)
+
+[node name="ClickLabel" type="Label" parent="ClickGate"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_top = 118.0
+offset_right = 480.0
+offset_bottom = 142.0
+theme_override_colors/font_color = Color(1, 0.82, 0.45, 1)
+theme_override_font_sizes/font_size = 24
+text = "点击开始"
+horizontal_alignment = 1
+
+[node name="ClickHint" type="Label" parent="ClickGate"]
+layout_mode = 0
+offset_top = 148.0
+offset_right = 480.0
+offset_bottom = 162.0
+theme_override_colors/font_color = Color(0.75, 0.73, 0.68, 1)
+text = "浏览器要求先点击一次才能播放声音，按 F 键可全屏"
+horizontal_alignment = 1
