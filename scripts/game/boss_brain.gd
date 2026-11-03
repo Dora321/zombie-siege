@@ -333,8 +333,9 @@ func _dig_in(z: Variant) -> void:
 	_note("burrow", "%s 钻进地下（%.1f 秒）" % [spec["title"], _burrow_t])
 
 
+## 看 burrowed 而不是计时：计时自然走完时 _burrow_t 已经扣到 0，再看计时就会留在地下隐身。
 func _surface(z: Variant) -> void:
-	if not underground():
+	if not z.burrowed:
 		return
 	_burrow_t = 0.0
 	z.burrowed = false
