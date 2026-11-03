@@ -312,7 +312,13 @@ func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: 
 	for i in chain + 1:
 		var c: Vector2 = cur.center()
 		points.append(c)
-		cur.take_damage(dmg, points[points.size() - 2].direction_to(c), knock, true, "arc")
+		var hit := dmg
+		# 湿身导电，伤害翻倍；只在第一跳飘字，免得一串闪电满屏是字
+		if cur.wet():
+			hit *= GameData.WET_ARC
+			if i == 0:
+				cur.cue("导电", cur.CUE_WET)
+		cur.take_damage(hit, points[points.size() - 2].direction_to(c), knock, true, "arc")
 		done.append(cur)
 		game.fx.zap(c)
 		dmg *= 0.8

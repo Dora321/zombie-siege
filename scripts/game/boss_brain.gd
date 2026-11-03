@@ -94,14 +94,16 @@ func setup(z: Variant) -> void:
 	_apply_phase(z)
 
 
-func info() -> Dictionary:
-	return {"title": spec["title"], "phase": phase, "count": phases.size(), "name": phases[phase]["name"], "shield": shield / shield_max if shield > 0.0 else 0.0, "status": status()}
+func info(z: Variant = null) -> Dictionary:
+	return {"title": spec["title"], "phase": phase, "count": phases.size(), "name": phases[phase]["name"], "shield": shield / shield_max if shield > 0.0 else 0.0, "status": status(z)}
 
 
-## 血条旁边的状态字：地下、再生、反弹。
-func status() -> String:
+## 血条旁边的状态字：地下、淬火、再生、反弹。
+func status(z: Variant = null) -> String:
 	if underground():
 		return "在地下"
+	if z != null and z.quenched() and has_armor(z):
+		return "淬火破甲"
 	if aura_t > 0.0:
 		return "反弹光环"
 	if _regen_state == "on":
@@ -129,8 +131,13 @@ func cloaked() -> bool:
 	return underground()
 
 
-func _armored() -> bool:
+## 有甲（覆甲巨像裸核之前）；淬火期间甲照样在，只是阈值不生效。
+func has_armor(_z: Variant) -> bool:
 	return float(spec.get("hit_floor", 0.0)) > 0.0 and not bool(phases[phase].get("bare", false))
+
+
+func _armored(z: Variant) -> bool:
+	return has_armor(z) and not z.quenched()
 
 
 func _count(key: String, amount := 1.0) -> void:
@@ -169,7 +176,7 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 			return 0.0
 		_force_out(z, {"blast": "爆炸", "tick": "火焰"}.get(src, "重击"))
 	# 覆甲：小伤害只结算一成。先看原始伤害，护盾照常全额吃
-	var light := _armored() and not FLOOR_EXEMPT.has(src) and amount < float(spec["hit_floor"])
+	var light := _armored(z) and not FLOOR_EXEMPT.has(src) and amount < float(spec["hit_floor"])
 	if shield > 0.0:
 		var soaked := minf(shield, amount)
 		shield -= soaked
@@ -195,9 +202,9 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 	return amount
 
 
-## 覆甲被霰弹、狙击、榴弹、回旋镖打出满额；镜面被电弧、爆炸、火焰或从背后打中。
-func weak_hit(_z: Variant, src: String, dir: Vector2) -> bool:
-	if _armored() and FLOOR_EXEMPT.has(src) and src != "":
+## 覆甲被霰弹、狙击、榴弹、回旋镖打出满额（淬火时什么都算满额）；镜面被电弧、爆炸、火焰或从背后打中。
+func weak_hit(z: Variant, src: String, dir: Vector2) -> bool:
+	if has_armor(z) and src != "" and (FLOOR_EXEMPT.has(src) or z.quenched()):
 		_count("weak")
 		return true
 	if bool(spec.get("reflect", false)) and (MIRROR_WEAK.has(src) or (MIRROR_BACK.has(src) and dir.dot(face) >= MIRROR_FRONT)):
@@ -646,6 +653,12 @@ func draw(z: Variant) -> void:
 		return
 	if bool(spec.get("reflect", false)):
 		_draw_mirror(z, mid)
+	if z.quenched() and has_armor(z):
+		# 淬火：甲缝里往外冒白汽
+		var k := int(Time.get_ticks_msec() / 90) % 8
+		for j in 3:
+			var at := Vector2(-6 + j * 6, -z.center_h * 2.0 + 2.0 - float((k + j * 3) % 8)).round()
+			z.draw_rect(Rect2(at, Vector2(2, 1)), Color(0.92, 0.94, 1.0, 0.8))
 	if _regen_state == "on" and z.hp < z.max_hp:
 		# 头顶往上冒的绿色小十字
 		var k := int(Time.get_ticks_msec() / 120) % 6

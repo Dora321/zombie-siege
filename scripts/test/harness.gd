@@ -920,6 +920,7 @@ func _flow_arena(g: Variant) -> void:
 	await _arena_graveborn(g)
 	await _arena_burrowlord(g)
 	await _arena_mirror(g)
+	await _arena_elements(g)
 	await _arena_overlord_shield(g)
 	await _arena_boss_loot(g)
 	await _arena_specials(g)
@@ -2304,6 +2305,139 @@ func _break_setup(g: Variant, kind: String, phase: int) -> Node2D:
 	brain._gap = 999.0
 	z._attack_t = 99.0
 	return z
+
+
+## 元素联动：湿身电弧翻倍（暴雨、酸雨、酸液池都会湿身），冻住挨霰弹或狙击碎冰，先燃后冻淬火破甲破盾。
+func _arena_elements(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	# 湿身电弧：同样一发，湿的那只吃两倍
+	var dry: Node2D = _arena_spawn(g, "tank", Vector2(60, -30))
+	var wet: Node2D = _arena_spawn(g, "tank", Vector2(60, 30))
+	await _sec(0.05)
+	wet.soak(5.0)
+	_check(wet.wet() and not dry.wet(), "湿身状态能挂上")
+	_cue_ready(wet)
+	var cond0 := _cues(g, "导电")
+	for z: Node2D in [dry, wet]:
+		z.stun(2.0)
+		g.ordnance.arc(from, from.direction_to(z.center()), 150.0, 20.0, 0, 1.0, 0.0)
+	var dry_loss: float = dry.max_hp - dry.hp
+	var wet_loss: float = wet.max_hp - wet.hp
+	_check(absf(wet_loss - dry_loss * GameData.WET_ARC) < 0.1, "湿身电弧伤害 ×%.0f（干 %.1f，湿 %.1f）" % [GameData.WET_ARC, dry_loss, wet_loss])
+	_check(_cues(g, "导电") == cond0 + 1, "电弧打湿身的僵尸飘「导电」")
+	# 暴雨：在场僵尸都湿身，和暴雨本身的电弧加成叠乘
+	await _arena_reset(g)
+	var rain: Node2D = _arena_spawn(g, "tank", Vector2(60, 0))
+	g.events._start_weather("storm")
+	await _sec(0.1)
+	_check(rain.wet(), "暴雨里僵尸湿身")
+	await _shot("96_wet")
+	rain.stun(2.0)
+	g.ordnance.arc(from, from.direction_to(rain.center()), 150.0, 20.0, 0, 1.0, 0.0)
+	var storm_loss: float = rain.max_hp - rain.hp
+	var want: float = 20.0 * float(GameData.EVENTS["storm"]["arc"]) * GameData.WET_ARC
+	_check(absf(storm_loss - want) < 0.1, "暴雨里湿身电弧叠乘（%.1f / %.1f）" % [storm_loss, want])
+	g.events._clear_weather()
+	await _sec(GameData.WET_HOLD + 0.1)
+	_check(not rain.wet(), "雨停后湿身很快干掉")
+	# 酸液池和酸雨溅到也湿身
+	g.bullets.add_pool(rain.position, 14.0, 3.0)
+	await _sec(0.05)
+	_check(rain.wet(), "踩进酸液池湿身")
+	g.bullets.clear_hazards()
+	await _sec(GameData.WET_HOLD + 0.1)
+	var splash: Node2D = _arena_spawn(g, "tank", Vector2(110, 0))
+	await _sec(0.02)
+	splash.stun(5.0)
+	g.hazards.acid(splash.position, 1.0)
+	await _sec(1.6)
+	_check(splash.wet() and splash._wet_t > GameData.WET_HOLD, "被酸雨溅到湿身一阵子（%.1f 秒）" % splash._wet_t)
+	g.hazards.clear()
+	# 碎冰：冻住时挨霰弹多吃一半，然后解冻；普通子弹不碎
+	await _arena_reset(g)
+	var ice: Node2D = _arena_spawn(g, "tank", Vector2(60, 0))
+	await _sec(0.05)
+	ice.apply_chill(1.0)
+	var hp0: float = ice.hp
+	ice.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
+	_check(absf(hp0 - ice.hp - 10.0 * GameData.FREEZE_VULN) < 0.05 and ice._frozen_t > 0.0, "普通子弹打冻住的僵尸不碎冰")
+	var shatter0 := _cues(g, "碎冰")
+	hp0 = ice.hp
+	ice.take_damage(10.0, Vector2.RIGHT, 0.0, false, "buckshot")
+	ice.take_damage(10.0, Vector2.RIGHT, 0.0, false, "buckshot")
+	var bonus := 10.0 * GameData.FREEZE_VULN * (1.0 + GameData.SHATTER_BONUS)
+	_check(absf(hp0 - ice.hp - bonus * 2.0) < 0.05, "霰弹碎冰：同一枪的弹丸都多吃 %d%%（%.1f / %.1f）" % [roundi(GameData.SHATTER_BONUS * 100.0), hp0 - ice.hp, bonus * 2.0])
+	_check(_cues(g, "碎冰") == shatter0 + 1, "碎冰只飘一次「碎冰」")
+	await _shot("97_shatter")
+	await _sec(0.15)
+	_check(ice._frozen_t <= 0.0 and ice.vulnerability() == 1.0, "碎冰后解冻")
+	# 真实开火：冻住后霰弹、狙击都能碎冰
+	await _arena_reset(g)
+	var ice2: Node2D = _arena_spawn(g, "tank", Vector2(60, 0))
+	await _sec(0.05)
+	# 满级霰弹碎冰能一枪打死坦克，加厚血量好看解冻
+	ice2.max_hp = 9000.0
+	ice2.hp = 9000.0
+	ice2.apply_chill(1.0)
+	shatter0 = _cues(g, "碎冰")
+	await _buckshot(g, ice2)
+	_check(_cues(g, "碎冰") == shatter0 + 1 and ice2._frozen_t <= 0.0, "霰弹打冻住的坦克碎冰并解冻")
+	ice2.apply_chill(1.0)
+	g.ordnance.beam(from, from.direction_to(ice2.center()), 520.0, 20.0, 0.0, 4)
+	await _sec(0.15)
+	_check(_cues(g, "碎冰") == shatter0 + 2 and ice2._frozen_t <= 0.0, "狙击打冻住的坦克也碎冰")
+	# 淬火：烧着的巨像挨冰，几秒内阈值失效，冲锋枪也打得进
+	var z: Node2D = await _boss_setup(g, "colossus", 0, Vector2(70, 0))
+	var quench0 := _cues(g, "淬火")
+	z.ignite(2.0)
+	await _sec(0.05)
+	z.apply_chill(0.2)
+	_check(z.quenched() and not z.burning(), "先燃后冻：火灭了，淬火")
+	_check(_cues(g, "淬火") == quench0 + 1, "淬火飘「淬火」")
+	_check(z.boss_info()["status"] == "淬火破甲", "血条旁写着淬火破甲")
+	await _shot("98_quench")
+	hp0 = z.hp
+	var vuln: float = z.vulnerability()
+	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
+	_check(absf(hp0 - z.hp - 10.0 * vuln) < 0.05, "淬火时巨像吃小伤害不打折（%.1f）" % (hp0 - z.hp))
+	hp0 = z.hp
+	_cue_ready(z)
+	var weak0 := _cues(g, "弱点！")
+	await _shoot_at(g, z, float(GameData.WEAPONS["smg"]["damage"]))
+	_check(hp0 - z.hp > float(GameData.WEAPONS["smg"]["damage"]) * 0.9, "淬火时冲锋枪打得进巨像（%.1f）" % (hp0 - z.hp))
+	_check(_cues(g, "弱点！") == weak0 + 1, "淬火时打巨像飘「弱点！」")
+	z._quench_t = 0.0
+	z._chill_t = 0.0
+	hp0 = z.hp
+	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
+	_check(absf(hp0 - z.hp - 1.0) < 0.05 and z.boss_info()["status"] != "淬火破甲", "淬火结束后装甲回来（%.1f）" % (hp0 - z.hp))
+	# 不先烧就冻，不淬火
+	z.apply_chill(0.2)
+	_check(not z.quenched(), "没着火时上冰不淬火")
+	# 护盾兵：盾烧着时挨冰弹，盾失效几秒
+	await _arena_reset(g)
+	var shield: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
+	await _sec(0.05)
+	var brain: Variant = shield._brain
+	brain.face = Vector2.LEFT
+	_check(shield.blocks_shot(Vector2.RIGHT), "护盾兵正面举盾")
+	shield.ignite(3.0)
+	quench0 = _cues(g, "淬火")
+	await _hold_fire(g, "cryo", 0.05)
+	await _sec(0.3)
+	_check(shield.quenched() and _cues(g, "淬火") == quench0 + 1, "冰弹打在烧着的盾上淬火")
+	_check(not shield.blocks_shot(Vector2.RIGHT), "淬火的盾挡不住正面子弹")
+	brain.face = Vector2.LEFT
+	hp0 = shield.hp
+	p.cooldown = 0.0
+	p.weapon_state["pistol"]["mag"] = 12
+	await _hold_fire(g, "pistol", 0.03)
+	await _sec(0.15)
+	_check(shield.hp < hp0, "淬火后正面子弹打得穿盾（%.1f）" % (hp0 - shield.hp))
+	shield._quench_t = 0.0
+	_check(shield.blocks_shot(Vector2.RIGHT), "淬火结束盾又挡得住")
 
 
 ## 用真实的开火路径对着 Boss 开一枪霰弹。

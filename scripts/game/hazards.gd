@@ -239,6 +239,8 @@ func _land(z: Zone) -> void:
 			Sfx.play("rock_fall", -4.0, 0.12)
 		"bomb", "acid":
 			game.damage_area(z.pos, z.r, z.damage, 0.8)
+			if z.kind == "acid":
+				game.soak_area(z.pos, z.r, GameData.WET_SPLASH)
 			game.fx.acid_burst(z.pos)
 			game.decals.stamp(Art.acid_splat, z.pos)
 			game.bullets.add_pool(z.pos, 14.0, 2.6)

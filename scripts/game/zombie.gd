@@ -10,6 +10,10 @@ const CUE_GAP := 0.25
 const CUE_REPEAT := 0.8
 const CUE_DING := Color("#c8d0dc")
 const CUE_WEAK := Color("#ffa040")
+const CUE_WET := Color("#90d0ff")
+const CUE_SHATTER := Color("#c8f4ff")
+const CUE_QUENCH := Color("#ff9a70")
+const WET_TINT := Color(0.72, 0.8, 1.02)
 const Elites := preload("res://scripts/game/elite_brains.gd")
 const BossBrain := preload("res://scripts/game/boss_brain.gd")
 
@@ -83,6 +87,10 @@ var _chill_t := 0.0
 var _frozen_t := 0.0
 var _stun_t := 0.0
 var _burn_t := 0.0
+# 元素联动：湿身、碎冰的解冻倒计时（-1 表示没在碎）、淬火
+var _wet_t := 0.0
+var _shatter_t := -1.0
+var _quench_t := 0.0
 var _dot_shown := 0.0
 var _ember_t := 0.0
 var _status_key := 0
@@ -255,8 +263,9 @@ func buckshot_hit(knock: float) -> void:
 
 
 ## 头顶飘一个克制反馈字：灰色「叮」是被挡住了，橙色「弱点！」是打对了。
-func cue(text: String, color: Color, repeat := CUE_REPEAT) -> void:
-	if _cue_t > 0.0 or (text == _cue_last and _cue_last_t > 0.0):
+## force 用在碎冰、淬火这种状态变化上，不吃节流。
+func cue(text: String, color: Color, repeat := CUE_REPEAT, force := false) -> void:
+	if not force and (_cue_t > 0.0 or (text == _cue_last and _cue_last_t > 0.0)):
 		return
 	_cue_t = CUE_GAP
 	_cue_last = text
@@ -290,7 +299,7 @@ func rallied() -> bool:
 
 ## 给 HUD 用的 Boss 信息。
 func boss_info() -> Dictionary:
-	return _brain.info()
+	return _brain.info(self)
 
 
 ## 防软锁：连续走不动时先回到格子中心重走，还不行就直接挪到下一格。
@@ -505,6 +514,23 @@ func _explode_now() -> void:
 	queue_free()
 
 
+func wet() -> bool:
+	return _wet_t > 0.0
+
+
+func soak(seconds: float) -> void:
+	if not dead:
+		_wet_t = maxf(_wet_t, seconds)
+
+
+func burning() -> bool:
+	return _burn_t > 0.0
+
+
+func quenched() -> bool:
+	return _quench_t > 0.0
+
+
 ## 冻住和减速时更吃伤害。
 func vulnerability() -> float:
 	if _frozen_t > 0.0:
@@ -517,6 +543,8 @@ func vulnerability() -> float:
 func apply_chill(amount: float) -> void:
 	if dead:
 		return
+	# 先燃后冻：冰把火浇灭的这一下淬火
+	var was_burning := _burn_t > 0.0
 	_burn_t = 0.0
 	_chill_t = GameData.CHILL_TIME + _status_bonus()
 	_chill += amount
@@ -529,6 +557,30 @@ func apply_chill(amount: float) -> void:
 			_brain.on_stun(self)
 		game.fx.frost(center())
 		Sfx.play("cryo", 0.0, 0.2)
+	if was_burning:
+		_quench()
+
+
+## 淬火：几秒内覆甲和盾失效。只有身上有甲或举着盾才飘字，免得普通僵尸身上冒出看不懂的字。
+func _quench() -> void:
+	_quench_t = GameData.QUENCH_TIME
+	if _brain != null and _brain.has_armor(self):
+		cue("淬火", CUE_QUENCH, CUE_REPEAT, true)
+		for i in 4:
+			game.fx.steam(center() + Vector2(randf_range(-4, 4), 0))
+		Sfx.play("shield_break", -4.0, 0.2)
+		Harness.note("%s 淬火，%.0f 秒内甲和盾失效" % [GameData.ZOMBIES[kind]["name"], GameData.QUENCH_TIME])
+
+
+## 冻住时挨霰弹或狙击：冰碎了，同一枪的弹丸在 SHATTER_GRACE 内都多吃一半，然后解冻。
+func _shatter() -> void:
+	if _shatter_t >= 0.0:
+		return
+	_shatter_t = GameData.SHATTER_GRACE
+	cue("碎冰", CUE_SHATTER, CUE_REPEAT, true)
+	game.fx.frost(center())
+	game.fx.debris(center(), "wall")
+	Sfx.play("shield_break", -2.0, 0.25)
 
 
 func stun(seconds: float) -> void:
@@ -580,6 +632,16 @@ func _tick_status(dt: float) -> void:
 	_chill_t -= dt
 	_frozen_t -= dt
 	_stun_t -= dt
+	_wet_t -= dt
+	_quench_t -= dt
+	if game.events.weather == "storm":
+		_wet_t = maxf(_wet_t, GameData.WET_HOLD)
+	if _shatter_t >= 0.0:
+		_shatter_t -= dt
+		if _shatter_t < 0.0:
+			_frozen_t = 0.0
+			_chill = 0.0
+			_chill_t = 0.0
 	if _chill_t <= 0.0:
 		_chill = 0.0
 	if _burn_t > 0.0:
@@ -600,11 +662,13 @@ func _tick_status(dt: float) -> void:
 		key = 3
 	elif _chill_t > 0.0:
 		key = 4
+	elif _wet_t > 0.0:
+		key = 5
 	if key != _status_key:
 		_status_key = key
-		body.modulate = [_tint, Color(0.55, 0.85, 1.7), Color(1.5, 1.45, 0.75), Color(1.6, 0.8, 0.5), Color(0.75, 0.95, 1.35)][key]
+		body.modulate = [_tint, Color(0.55, 0.85, 1.7), Color(1.5, 1.45, 0.75), Color(1.6, 0.8, 0.5), Color(0.75, 0.95, 1.35), WET_TINT * _tint][key]
 		queue_redraw()
-	elif key == 2:
+	elif key == 2 or key == 5:
 		queue_redraw()
 
 
@@ -615,6 +679,9 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true,
 		return
 	var frozen := _frozen_t > 0.0
 	amount *= vulnerability()
+	var shatter := frozen and (src == "buckshot" or src == "beam")
+	if shatter:
+		amount *= 1.0 + GameData.SHATTER_BONUS
 	if amount >= KILL_DAMAGE:
 		overkill = true
 		no_blast = true
@@ -635,8 +702,10 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true,
 	game.fx.blood_hit(hit_pos, dir, 3 + int(amount * 0.2), Color(String(_stat["blood"])))
 	if show_number:
 		game.fx.number(hit_pos + Vector2(randf_range(-3, 3), -6), roundi(amount), Color("#ffe080") if amount < 30.0 else Color("#ffa040"))
-	# 打对了克制手段：冻住吃易伤，或者 Boss/精英自己判定（覆甲吃满额、绕后、爆炸火电）
-	if src != "" and not overkill and (frozen or (_brain != null and _brain.weak_hit(self, src, dir))):
+	# 打对了克制手段：冻住吃易伤（霰弹和狙击还会碎冰），或者 Boss/精英自己判定（覆甲吃满额、绕后、爆炸火电）
+	if shatter and not overkill:
+		_shatter()
+	elif src != "" and not overkill and (frozen or (_brain != null and _brain.weak_hit(self, src, dir))):
 		cue("弱点！", CUE_WEAK)
 	if randf() < 0.3:
 		game.decals.stamp_pixel_group(position + dir * randf_range(4, 14), Color("#7c1414"), 4)
@@ -688,6 +757,10 @@ func _draw() -> void:
 			for k in 3:
 				var at := Vector2(cos(a + k * 2.1) * hit_r, y + sin(a + k * 2.1) * 2.0).round()
 				draw_rect(Rect2(at, Vector2(2, 2)), Color("#fff060"))
+		5:
+			# 湿身：身侧往下滴的水珠
+			var drip := (Time.get_ticks_msec() / 70 + _phase * 3) % 12
+			draw_rect(Rect2(Vector2(roundf(hit_r * 0.6), -center_h * 1.6 + drip), Vector2(1, 2)), Color("#8cc8ff"))
 	if _brain != null:
 		_brain.draw(self)
 	# 被尖叫鼓动的僵尸头顶亮红色感叹号

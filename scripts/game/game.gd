@@ -703,6 +703,13 @@ func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool,
 			s.take_damage(damage * 1.5)
 
 
+## 酸雨溅到的僵尸湿身。
+func soak_area(pos: Vector2, radius: float, seconds: float) -> void:
+	for z: Variant in zombies_near(pos, radius + 12.0):
+		if not z.dead and not z.flying and z.position.distance_to(pos) < radius:
+			z.soak(seconds)
+
+
 ## Boss 招式的落点结算：伤玩家、诱饵和建筑，不伤僵尸。
 func damage_area(pos: Vector2, radius: float, damage: float, structure_mult: float) -> void:
 	ordnance.hurt_decoys(pos, damage, radius)

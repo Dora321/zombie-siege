@@ -98,6 +98,15 @@ const FREEZE_TIME := 1.8
 const CHILL_VULN := 1.25
 const FREEZE_VULN := 1.5
 const BURN_DPS := 8.0
+## 元素联动。湿身（下雨、踩酸液池、被酸雨溅到）时电弧伤害翻倍，和暴雨本身的电弧加成叠乘；
+## 冻住时挨霰弹或狙击会碎冰：这一下多吃一半，同一枪的弹丸都算，然后解冻；
+## 先燃后冻（烧着时上冰）会淬火：几秒内 Boss 的覆甲和护盾兵的盾都失效。
+const WET_ARC := 2.0
+const WET_HOLD := 0.6
+const WET_SPLASH := 2.5
+const SHATTER_BONUS := 0.5
+const SHATTER_GRACE := 0.08
+const QUENCH_TIME := 3.0
 
 ## 道具：按顺序排在快捷栏。pack 是商店一次买几个，max 是最多带几个，start 是开局自带。
 const ITEM_ORDER: Array[String] = ["medkit", "armor", "frag", "sticky", "flash", "decoy", "ammo_crate", "inf_ammo", "speed", "damage", "nuke"]

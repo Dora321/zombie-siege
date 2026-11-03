@@ -37,6 +37,11 @@ func on_buckshot(_z: Variant, _knock: float) -> void:
 	pass
 
 
+## 身上有没有能被淬火破掉的甲或盾。
+func has_armor(_z: Variant) -> bool:
+	return false
+
+
 ## 这一下有没有打在弱点上（伤害已经结算进血量）。src 同 absorb，dir 是命中方向，火焰 tick 时为零向量。
 func weak_hit(_z: Variant, _src: String, _dir: Vector2) -> bool:
 	return false

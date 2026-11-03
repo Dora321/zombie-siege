@@ -111,8 +111,12 @@ class Shielder extends "res://scripts/game/zombie_brain.gd":
 		face = face.rotated(clampf(face.angle_to(want), -TURN * dt, TURN * dt))
 		return null
 
+	## 淬火后盾烧裂了，几秒内挡不住东西。
 	func blocks(z: Variant, dir: Vector2) -> bool:
-		return up and not z.incapacitated() and dir.dot(face) < FRONT
+		return up and not z.incapacitated() and not z.quenched() and dir.dot(face) < FRONT
+
+	func has_armor(_z: Variant) -> bool:
+		return up
 
 	## 举着盾还挨了打：绕后或盾放下了的直射，或者不看朝向的爆炸、火焰、电弧。狙击穿盾的半伤不算。
 	func weak_hit(z: Variant, src: String, dir: Vector2) -> bool:
@@ -144,6 +148,8 @@ class Shielder extends "res://scripts/game/zombie_brain.gd":
 		if z.incapacitated():
 			mid += Vector2(0, 6)
 		var plate := Color("#f0f8ff") if _flash_t > 0.0 else Color("#7c8ca8")
+		if z.quenched():
+			plate = Color("#d07050")
 		var edge := Color("#28303c")
 		for k in range(-7, 8):
 			var at: Vector2 = (mid + side * k).round()

@@ -135,6 +135,9 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 			return false
 		# 护盾兵正面：子弹停在盾上，只磨耐久
 		if best.blocks_shot(dir):
+			# 冰弹打在烧着的盾上：淬火，盾当场失效（这一发还是挡下了）
+			if b.chill > 0.0 and best.burning():
+				best.apply_chill(b.chill)
 			best.shield_hit(damage)
 			best.cue("叮", best.CUE_DING)
 			game.fx.spark(best.center() - dir * float(best.hit_r))
@@ -199,8 +202,13 @@ func _update_pools(dt: float) -> void:
 		if p.t <= 0.0:
 			pools[i] = pools[pools.size() - 1]
 			pools.pop_back()
-		elif player != null and player.alive and player.position.distance_squared_to(p.pos) < p.r * p.r:
-			player.take_dot(ACID_DPS * dt)
+		else:
+			if player != null and player.alive and player.position.distance_squared_to(p.pos) < p.r * p.r:
+				player.take_dot(ACID_DPS * dt)
+			# 踩进酸液池的僵尸湿身
+			for z: Variant in game.zombies_near(p.pos, p.r + 8.0):
+				if not z.flying and z.position.distance_squared_to(p.pos) < p.r * p.r:
+					z.soak(GameData.WET_HOLD)
 		i -= 1
 
 

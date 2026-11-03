@@ -341,6 +341,21 @@ func smoke(pos: Vector2, fire: bool) -> void:
 	p.life = randf_range(0.5, 1.0)
 
 
+## 淬火冒的白汽：和烟一样往上飘，颜色浅。
+func steam(pos: Vector2) -> void:
+	var p := _spawn()
+	p.x = pos.x
+	p.y = pos.y + 20.0
+	p.z = 20.0
+	p.vx = randf_range(-5, 5)
+	p.vy = 0.0
+	p.vz = randf_range(18, 30)
+	p.gravity = 0.0
+	p.size = 2
+	p.color = Color(0.9, 0.92, 0.96, 0.8)
+	p.life = randf_range(0.35, 0.7)
+
+
 func acid_burst(pos: Vector2) -> void:
 	for i in 8:
 		var p := _spawn()
