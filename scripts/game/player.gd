@@ -7,6 +7,8 @@ const DASH_SPEED := 300.0
 const DASH_TIME := 0.15
 const BOX_R := 5.0
 const HAND_H := 7.0
+## 进化武器的名字和 HUD 标记用这个颜色。
+const EVO_COLOR := Color("#80f0ff")
 
 var game: Node
 var map: Node2D
@@ -25,6 +27,8 @@ var weapon_state := {}
 ## 随身枪袋：只有装在里面的枪能切出来用、能补弹药。顺序同 WEAPON_ORDER，手枪永远在里面。
 var loadout: Array[String] = []
 var weapon_slots := GameData.BASE_WEAPON_SLOTS
+## 本局每种道具用掉了几次，进化条件要看。
+var used_items := {}
 var stats := {}
 var cooldown := 0.0
 var reload_t := 0.0
@@ -142,6 +146,66 @@ func unequip(id: String) -> bool:
 		reload_t = 0.0
 		_set_gun_sprite()
 		queue_redraw()
+	return true
+
+
+## 这把枪进化成了什么，没进化返回空串。
+func evolution(id: String) -> String:
+	return String(weapon_state[id].get("evo", ""))
+
+
+func weapon_name(id: String) -> String:
+	var evo := evolution(id)
+	return String(GameData.EVOLUTIONS[evo]["name"]) if evo != "" else String(GameData.WEAPONS[id]["name"])
+
+
+## 能不能进化：满级、还没进化、need 满足。consume 是要扣的道具数，reason 是不满足时给商店看的原因。
+func evolve_check(id: String) -> Dictionary:
+	var evo := GameData.evolution_of(id)
+	var out := {"evo": evo, "ok": false, "consume": 0, "reason": ""}
+	if evo == "" or evolution(id) != "":
+		return out
+	if int(weapon_state[id]["level"]) < GameData.MAX_WEAPON_LEVEL:
+		out["reason"] = "满级后可进化"
+		return out
+	var need: Dictionary = GameData.EVOLUTIONS[evo]["need"]
+	var item := String(need["item"])
+	var consume := int(need["consume"])
+	var kills: Dictionary = need.get("kills", {})
+	var have_kills: int = game.kills_of(kills["kinds"]) if not kills.is_empty() else 0
+	if not kills.is_empty() and have_kills >= int(kills["count"]):
+		out["ok"] = true
+	elif bool(need.get("used", false)) and int(used_items.get(item, 0)) > 0:
+		out["ok"] = true
+	elif int(items[item]) >= maxi(consume, 1):
+		out["ok"] = true
+		out["consume"] = consume
+	if out["ok"]:
+		return out
+	var item_name := String(GameData.ITEMS[item]["name"])
+	var reason := "需%s×%d" % [item_name, consume] if consume > 0 else "需带着%s" % item_name
+	if bool(need.get("used", false)):
+		reason += "或本局用过"
+	if not kills.is_empty():
+		var names: Array[String] = []
+		for k: String in kills["kinds"]:
+			names.append(GameData.short_name(k))
+		reason += "或击杀%s %d/%d" % ["/".join(names), have_kills, int(kills["count"])]
+	out["reason"] = reason
+	return out
+
+
+## 原地进化，扣掉要消耗的道具。金币由商店扣。
+func try_evolve(id: String) -> bool:
+	var check := evolve_check(id)
+	if not bool(check["ok"]):
+		return false
+	var evo := String(check["evo"])
+	var item := String(GameData.EVOLUTIONS[evo]["need"]["item"])
+	items[item] = int(items[item]) - int(check["consume"])
+	if int(items[selected_item]) <= 0:
+		cycle_item()
+	weapon_state[id]["evo"] = evo
 	return true
 
 
@@ -381,6 +445,8 @@ func switch_weapon(id: String) -> void:
 	weapon_id = id
 	reload_t = 0.0
 	cooldown = maxf(cooldown, 0.12)
+	if evolution(id) != "":
+		game.fx.text(position + Vector2(0, -22), weapon_name(id), EVO_COLOR)
 	_set_gun_sprite()
 	Sfx.play("reload", -6.0, 0.15)
 	queue_redraw()
@@ -454,19 +520,21 @@ func _try_fire() -> void:
 func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 	var mode := String(s.get("mode", "bullet"))
 	var flash := String(s.get("flash", ""))
+	var evo := evolution(weapon_id)
 	if flash != "none" and flash != "flame":
 		game.fx.muzzle_flash(muzzle, aim, bool(s.get("big_flash", false)), flash)
 	match mode:
 		"beam":
-			game.ordnance.beam(muzzle, aim, float(s["range"]), damage, float(s["knock"]), int(s["pierce"]))
+			game.ordnance.beam(muzzle, aim, float(s["range"]), damage, float(s["knock"]), int(s["pierce"]), evo == "puncturer")
 		"flame":
 			game.ordnance.flame(muzzle, aim, float(s["range"]), float(s["cone"]), damage)
 		"lob":
-			game.ordnance.lob("grenade", muzzle, lob_target(float(s["range"])), damage, float(s["radius"]))
+			game.ordnance.lob("thermite" if evo == "thermite" else "grenade", muzzle, lob_target(float(s["range"])), damage, float(s["radius"]))
 		"arc":
-			game.ordnance.arc(muzzle, aim, float(s["range"]), damage, int(s["chain"]), float(s["jump"]), float(s["knock"]))
+			game.ordnance.arc(muzzle, aim, float(s["range"]), damage, int(s["chain"]), float(s["jump"]), float(s["knock"]), evo == "storm_rod")
 		"boomerang":
-			game.ordnance.boomerang(muzzle, aim, float(s["speed"]), float(s["range"]), damage, float(s["knock"]))
+			var saw := evo == "saw_rang"
+			game.ordnance.boomerang(muzzle, aim, float(s["speed"]), float(s["range"]), damage * (GameData.SAW_MULT if saw else 1.0), float(s["knock"]), saw)
 		_:
 			var spread := deg_to_rad(float(s["spread"]))
 			for i in int(s["pellets"]):
@@ -475,6 +543,7 @@ func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 				var b: Variant = game.bullets.fire(muzzle, d * bullet_speed, damage, float(s["knock"]), float(s["life"]), int(s["pierce"]), Color(String(s["color"])), true)
 				b.chill = float(s.get("chill", 0.0))
 				b.buckshot = int(s["pellets"]) > 1
+				b.mine = evo == "frost_mine"
 
 
 ## 回旋镖飞回手里。
@@ -498,6 +567,7 @@ func use_item(id: String) -> bool:
 		Sfx.play("deny")
 		return false
 	items[id] = int(items[id]) - 1
+	used_items[id] = int(used_items.get(id, 0)) + 1
 	if id == selected_item and int(items[id]) <= 0:
 		cycle_item()
 	return true

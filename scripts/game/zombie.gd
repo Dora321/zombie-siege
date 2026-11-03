@@ -523,6 +523,11 @@ func soak(seconds: float) -> void:
 		_wet_t = maxf(_wet_t, seconds)
 
 
+## 身上有甲（覆甲 Boss）或举着盾（护盾兵）。
+func armored() -> bool:
+	return _brain != null and _brain.has_armor(self)
+
+
 func burning() -> bool:
 	return _burn_t > 0.0
 
@@ -564,7 +569,7 @@ func apply_chill(amount: float) -> void:
 ## 淬火：几秒内覆甲和盾失效。只有身上有甲或举着盾才飘字，免得普通僵尸身上冒出看不懂的字。
 func _quench() -> void:
 	_quench_t = GameData.QUENCH_TIME
-	if _brain != null and _brain.has_armor(self):
+	if armored():
 		cue("淬火", CUE_QUENCH, CUE_REPEAT, true)
 		for i in 4:
 			game.fx.steam(center() + Vector2(randf_range(-4, 4), 0))

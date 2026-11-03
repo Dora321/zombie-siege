@@ -60,6 +60,8 @@ var end_reason := ""
 var result_rank := 0
 ## 克制反馈飘字（叮、弱点！……）各出现了几次，机器人日志和测试看这个。
 var cue_stats := {}
+## 本局每种僵尸杀了几只，进化条件要看。
+var kind_kills := {}
 
 var player: Node2D
 var base: Node2D
@@ -540,6 +542,7 @@ func credit_kill(z: Variant, drops: bool) -> void:
 		return
 	var stat: Dictionary = GameData.ZOMBIES[z.kind]
 	kills += 1
+	kind_kills[z.kind] = int(kind_kills.get(z.kind, 0)) + 1
 	Harness.on_kill(z.kind)
 	combo += 1
 	combo_t = COMBO_WINDOW
@@ -570,6 +573,13 @@ func credit_kill(z: Variant, drops: bool) -> void:
 		pickups.drop(z.position + Vector2(0, -4), "ammo", 1)
 	elif entry.get("kind") == "med":
 		pickups.drop(z.position + Vector2(0, -4), "med", 25)
+
+
+func kills_of(kinds: Array) -> int:
+	var n := 0
+	for k: String in kinds:
+		n += int(kind_kills.get(k, 0))
+	return n
 
 
 func combo_multiplier() -> float:
@@ -665,7 +675,8 @@ func _tick_game_over() -> void:
 # ---------------------------------------------------------------------------
 
 ## spare_base：玩家自己的榴弹和手雷不伤基地。
-func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool, spare_base := false) -> void:
+## heavy 是对坦克和覆甲 Boss 的额外倍率（铝热榴弹）。
+func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool, spare_base := false, heavy := 1.0) -> void:
 	var radius: float = explode_radius * events.splash_mult
 	fx.explosion(pos, radius)
 	ordnance.hurt_decoys(pos, damage, radius)
@@ -685,6 +696,8 @@ func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool,
 			# 战利品「掘地晶石」：玩家的爆炸打 Boss 更疼
 			if friendly and z.is_boss:
 				mult *= player.blast_boss_mult
+			if heavy != 1.0 and (z.kind == "tank" or (z.is_boss and z.armored())):
+				mult *= heavy
 			# 爆炸不看朝向，还会狠狠削一下盾
 			z.shield_hit(damage * falloff * mult)
 			z.take_damage(damage * falloff * mult, pos.direction_to(z.center()), 160.0, true, "blast")

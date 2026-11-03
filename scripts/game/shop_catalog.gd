@@ -34,11 +34,30 @@ static func items(g: Node) -> Array:
 			desc = "没带在身上 · " + desc
 		var item := {
 			"id": "up_" + id, "tab": TAB_WEAPON,
-			"name": "[%d] 解锁%s" % [key, spec["name"]] if level == 0 else "[%d] %s Lv%d" % [key, spec["name"], level],
+			"name": "[%d] 解锁%s" % [key, spec["name"]] if level == 0 else "[%d] %s Lv%d" % [key, p.weapon_name(id), level],
 			"desc": desc,
 			"cost": 0 if maxed else GameData.upgrade_cost(id, level),
 			"locked": maxed or bag_full,
 		}
+		# 满级后这一行变成进化：条件够了花一点钱原地进化，不够就写还差什么
+		var evo := GameData.evolution_of(id)
+		if maxed and evo != "":
+			var spec_evo: Dictionary = GameData.EVOLUTIONS[evo]
+			if p.evolution(id) != "":
+				item["desc"] = "已进化 · " + String(spec_evo["desc"])
+				item["locked_text"] = "已进化"
+			else:
+				var check: Dictionary = p.evolve_check(id)
+				item["id"] = "evo_" + id
+				item["cost"] = GameData.EVOLVE_COST
+				item["locked"] = not bool(check["ok"])
+				item["button"] = "进化 %d" % GameData.EVOLVE_COST
+				if bool(check["ok"]):
+					item["desc"] = "进化成%s：%s" % [spec_evo["name"], spec_evo["desc"]]
+				else:
+					item["desc"] = "进化%s%s" % [spec_evo["name"], check["reason"]]
+			if not p.carries(id):
+				item["desc"] = "没带在身上 · " + String(item["desc"])
 		if level > 0 and id != "pistol":
 			if p.carries(id):
 				item["swap"] = {"id": "unequip_" + id, "text": "卸下", "ok": p.can_unequip(id)}
@@ -166,6 +185,9 @@ static func buy(g: Node, id: String) -> bool:
 	var p: Variant = g.player
 	if id.begins_with("up_"):
 		p.upgrade_weapon(id.trim_prefix("up_"))
+	elif id.begins_with("evo_"):
+		if not p.try_evolve(id.trim_prefix("evo_")):
+			return false
 	elif id.begins_with("ammo_"):
 		var weapon := id.trim_prefix("ammo_")
 		p.weapon_state[weapon]["reserve"] += int(GameData.WEAPONS[weapon]["ammo_pack"])

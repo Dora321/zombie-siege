@@ -131,10 +131,10 @@ func _make_row(item: Dictionary) -> Control:
 	buy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var id := String(item["id"])
 	if bool(item["locked"]):
-		buy.text = "--"
+		buy.text = String(item.get("locked_text", "--"))
 		buy.disabled = true
 	else:
-		buy.text = "%d 金币" % int(item["cost"])
+		buy.text = String(item.get("button", "%d 金币" % int(item["cost"])))
 		buy.disabled = not game.shop_can_buy(item)
 		buy.pressed.connect(_on_buy.bind(id))
 		buy.mouse_entered.connect(func(): Sfx.play("ui_hover"))

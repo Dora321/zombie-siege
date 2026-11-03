@@ -211,11 +211,12 @@ func _draw_weapons() -> void:
 	for id: String in owned:
 		var st: Dictionary = p.weapon_state[id]
 		var selected: bool = id == p.weapon_id
+		var evolved: bool = p.evolution(id) != ""
 		var w := slot_w if selected else mini_w
 		var rect := Rect2(x, y0, w, 21)
 		x += w + 2
 		draw_rect(rect, Color(0.09, 0.08, 0.11, 0.86) if not selected else Color(0.28, 0.14, 0.11, 0.92))
-		draw_rect(rect, Color("#ffc050") if selected else Color("#55525c"), false, 1.0)
+		draw_rect(rect, Color("#ffc050") if selected else (p.EVO_COLOR if evolved else Color("#55525c")), false, 1.0)
 		Art.draw_tiny(self, str(GameData.WEAPON_ORDER.find(id) + 1), rect.position + Vector2(3, 3), Color("#ffc050") if selected else Color("#a0a0a8"))
 		var gun: Dictionary = Art.guns[id]
 		var tex: Texture2D = gun["tex"]
@@ -231,7 +232,10 @@ func _draw_weapons() -> void:
 		if mag == 0 and (selected or reserve <= 0):
 			ammo_col = Color("#ff6050")
 		Art.draw_tiny(self, ammo_txt, rect.position + Vector2(3, 14), ammo_col)
-		if selected:
+		# 进化过的枪等级后面多个「+」，青色
+		if selected and evolved:
+			Art.draw_tiny(self, "%d+" % int(st["level"]), rect.position + Vector2(slot_w - 10, 3), p.EVO_COLOR)
+		elif selected:
 			Art.draw_tiny(self, "%d" % int(st["level"]), rect.position + Vector2(slot_w - 6, 3), Color("#70d080"))
 		if selected and p.reload_t > 0.0:
 			var ratio: float = 1.0 - p.reload_t / p.reload_total

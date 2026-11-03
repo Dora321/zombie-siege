@@ -122,7 +122,7 @@ class Shielder extends "res://scripts/game/zombie_brain.gd":
 	func weak_hit(z: Variant, src: String, dir: Vector2) -> bool:
 		if not up:
 			return false
-		if src == "blast" or src == "tick" or src == "arc":
+		if src == "blast" or src == "tick" or src == "arc" or src == "saw":
 			return true
 		return (src == "bullet" or src == "buckshot" or src == "beam" or src == "rang") and not blocks(z, dir)
 

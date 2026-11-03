@@ -56,6 +56,8 @@ class Rang:
 	var age: float
 	var returning: bool
 	var hits: Array = []
+	## 锯刃回旋：锯穿盾牌，镜子弹不回。
+	var saw := false
 
 
 class Decoy:
@@ -113,7 +115,8 @@ func nuke_active() -> bool:
 # 狙击枪：瞬间命中的光束，穿透僵尸和障碍
 # ---------------------------------------------------------------------------
 
-func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: float, pierce: int) -> void:
+## punch 是穿甲狙击：穿盾不减半，打坦克、举盾的护盾兵和覆甲 Boss 再加成。
+func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: float, pierce: int, punch := false) -> void:
 	game.bullets.shots_fired += 1
 	var to := from + dir * length
 	var hit_list: Array = []
@@ -135,12 +138,17 @@ func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: floa
 		if z.reflect_shot(dir, damage, "beam", true):
 			to = from + dir * float(hit_list[i]["d"])
 			break
-		# 狙击枪能打穿护盾，但伤害减半
+		var hit := damage
+		if punch and (z.kind == "tank" or z.armored()):
+			hit *= GameData.PUNCTURE_MULT
+		# 狙击枪能打穿护盾，但伤害减半；穿甲狙击不减
 		if z.blocks_shot(dir):
 			z.shield_hit(damage)
-			z.take_damage(damage * SHIELD_PIERCE, dir, knock, true, "beam")
+			z.take_damage(hit if punch else damage * SHIELD_PIERCE, dir, knock, true, "beam")
+			if punch:
+				z.cue("穿甲", z.CUE_WEAK)
 		else:
-			z.take_damage(damage, dir, knock, true, "beam")
+			z.take_damage(hit, dir, knock, true, "beam")
 		game.fx.spark(at)
 		game.bullets.shots_hit += 1
 		game.on_bullet_hit()
@@ -197,18 +205,18 @@ func flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage: 
 		add_fire(ground + dir * length * randf_range(0.55, 1.0) + dir.orthogonal() * randf_range(-8.0, 8.0))
 
 
-func add_fire(pos: Vector2) -> void:
+func add_fire(pos: Vector2, seconds := FIRE_TIME) -> void:
 	if map.blocks(map.cell_of(pos), map.BLOCK_BULLET):
 		return
 	for f in fires:
 		if f.pos.distance_squared_to(pos) < 36.0:
-			f.t = FIRE_TIME
+			f.t = maxf(f.t, seconds)
 			return
 	if fires.size() >= MAX_FIRES:
 		fires.remove_at(0)
 	var f := Fire.new()
 	f.pos = pos
-	f.t = FIRE_TIME
+	f.t = seconds
 	fires.append(f)
 	game.decals.stamp_pixel_group(pos, Color(0.09, 0.08, 0.08, 0.7), 5)
 
@@ -234,6 +242,13 @@ func _lob_land(l: Lob) -> void:
 	match l.kind:
 		"grenade":
 			game.explode(l.to, l.damage, l.radius, true, true)
+		"thermite":
+			# 铝热榴弹：打重甲更疼，落点一圈火烧好几秒
+			game.explode(l.to, l.damage, l.radius, true, true, GameData.THERMITE_HEAVY)
+			var ground := l.to + GROUND_OFFSET
+			add_fire(ground, GameData.THERMITE_FIRE_TIME)
+			for k in GameData.THERMITE_FIRES - 1:
+				add_fire(ground + Vector2.from_angle(TAU * k / (GameData.THERMITE_FIRES - 1)) * l.radius * 0.45, GameData.THERMITE_FIRE_TIME)
 		"decoy":
 			var d := Decoy.new()
 			d.pos = l.to + GROUND_OFFSET
@@ -269,9 +284,40 @@ func _nearest_zombie(pos: Vector2, radius: float) -> Variant:
 	return best
 
 
+## 冰封雷：挂在僵尸身上，同一只同时只挂一颗。
+func plant_mine(z: Variant, bullet_damage: float) -> void:
+	if z.dead:
+		return
+	for b in bombs:
+		if b.kind == "ice" and b.target == z:
+			return
+	var b := Bomb.new()
+	b.pos = z.center()
+	b.target = z
+	b.fuse = GameData.FROST_MINE_FUSE
+	b.kind = "ice"
+	b.damage = bullet_damage * GameData.FROST_MINE_DAMAGE
+	b.radius = GameData.FROST_MINE_R
+	bombs.append(b)
+
+
+## 冰雷炸开：半径内的僵尸都上一层冰，再吃一点伤害。不炸建筑、不伤玩家。
+func _ice_burst(pos: Vector2, radius: float, damage: float) -> void:
+	game.fx.ring(pos, radius, 0.25, Color("#c8f4ff"))
+	Sfx.play("cryo", -2.0, 0.2)
+	for z: Variant in game.zombies_near(pos, radius + 12.0):
+		if z.dead or z.burrowed or z.center().distance_to(pos) > radius + float(z.hit_r):
+			continue
+		z.apply_chill(GameData.FROST_MINE_CHILL)
+		game.fx.frost(z.center())
+		z.take_damage(damage, pos.direction_to(z.center()), 0.0, true, "blast")
+
+
 func _bomb_go_off(b: Bomb) -> void:
 	if b.kind == "flash":
 		_flash_burst(b.pos, b.radius, b.damage)
+	elif b.kind == "ice":
+		_ice_burst(b.pos, b.radius, b.damage)
 	else:
 		game.explode(b.pos, b.damage, b.radius, true, true)
 
@@ -298,24 +344,37 @@ func _flash_burst(pos: Vector2, radius: float, seconds: float) -> void:
 # 电弧枪：打中第一只后在附近连跳
 # ---------------------------------------------------------------------------
 
-func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: int, jump: float, knock: float) -> void:
+## rod 是避雷针：首跳加成、湿身更痛；射程内前方有诱饵时先打到诱饵，再从诱饵多连几跳。
+func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: int, jump: float, knock: float, rod := false) -> void:
 	var damage: float = base_damage * game.events.arc_mult
 	game.bullets.shots_fired += 1
-	var first: Variant = _arc_first(from, dir, length)
+	var points: Array[Vector2] = [from]
+	var done: Array = []
+	var first: Variant = null
+	var lure: Variant = _rod_decoy(from, dir, length) if rod else null
+	if lure != null:
+		var post: Vector2 = lure.pos + Vector2(0, -10)
+		points.append(post)
+		game.fx.zap(post)
+		first = _arc_next(post, jump, done)
+		chain += GameData.ROD_DECOY_CHAIN
+		if first == null:
+			_add_bolt(points, 0.13)
+			return
+	else:
+		first = _arc_first(from, dir, length)
 	if first == null:
 		_add_bolt([from, from + dir * length * 0.45], 0.08)
 		return
-	var points: Array[Vector2] = [from]
-	var done: Array = []
 	var cur: Variant = first
-	var dmg := damage
+	var dmg := damage * (GameData.ROD_FIRST if rod else 1.0)
 	for i in chain + 1:
 		var c: Vector2 = cur.center()
 		points.append(c)
 		var hit := dmg
-		# 湿身导电，伤害翻倍；只在第一跳飘字，免得一串闪电满屏是字
+		# 湿身导电，伤害翻倍（避雷针再乘一点）；只在第一跳飘字，免得一串闪电满屏是字
 		if cur.wet():
-			hit *= GameData.WET_ARC
+			hit *= GameData.WET_ARC * (GameData.ROD_WET if rod else 1.0)
 			if i == 0:
 				cur.cue("导电", cur.CUE_WET)
 		cur.take_damage(hit, points[points.size() - 2].direction_to(c), knock, true, "arc")
@@ -328,6 +387,22 @@ func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: 
 	game.bullets.shots_hit += 1
 	game.on_bullet_hit()
 	_add_bolt(points, 0.13)
+
+
+## 避雷针引雷的诱饵：射程内、大致在前方、中间没挡着的最近一个。
+func _rod_decoy(from: Vector2, dir: Vector2, length: float) -> Variant:
+	var best: Variant = null
+	var best_d := length
+	for d in decoys:
+		var to: Vector2 = d.pos - (from + GROUND_OFFSET)
+		var dist := to.length()
+		if not d.alive or dist > best_d or to.dot(dir) <= 0.0:
+			continue
+		if not map.line_clear(from + GROUND_OFFSET, d.pos, map.BLOCK_BULLET):
+			continue
+		best_d = dist
+		best = d
+	return best
 
 
 ## 第一跳选准星锥形内最近的；角度偏得越多越不优先。
@@ -369,8 +444,9 @@ func _arc_next(from: Vector2, jump: float, done: Array) -> Variant:
 # 回旋镖：飞出去再飞回来，每程每只僵尸只打一次；接住才能再扔
 # ---------------------------------------------------------------------------
 
-func boomerang(from: Vector2, dir: Vector2, speed: float, length: float, damage: float, knock: float) -> void:
+func boomerang(from: Vector2, dir: Vector2, speed: float, length: float, damage: float, knock: float, saw := false) -> void:
 	var r := Rang.new()
+	r.saw = saw
 	r.pos = from
 	r.dir = dir
 	r.speed = speed
@@ -425,14 +501,16 @@ func _step_rang(r: Rang, dt: float) -> bool:
 		var reach: float = float(z.hit_r) + 5.0
 		if z.center().distance_squared_to(r.pos) <= reach * reach:
 			r.hits.append(z)
-			if z.reflect_shot(r.dir, r.damage, "rang", true):
+			var src := "saw" if r.saw else "rang"
+			if z.reflect_shot(r.dir, r.damage, src, true):
 				continue
 			if z.blocks_shot(r.dir):
-				z.shield_hit(r.damage)
-				z.cue("叮", z.CUE_DING)
+				z.shield_hit(r.damage * (GameData.SAW_SHIELD_WEAR if r.saw else 1.0))
 				game.fx.spark(r.pos)
-				continue
-			z.take_damage(r.damage, r.dir, r.knock, true, "rang")
+				if not r.saw:
+					z.cue("叮", z.CUE_DING)
+					continue
+			z.take_damage(r.damage, r.dir, r.knock, true, src)
 			game.bullets.shots_hit += 1
 			game.on_bullet_hit()
 	return false
@@ -699,8 +777,12 @@ func _draw() -> void:
 		_draw_bomb(b)
 	for r in rangs:
 		var tex: Texture2D = Art.boomerang_tex
-		draw_set_transform(r.pos.round(), r.age * 18.0)
-		draw_texture(tex, -tex.get_size() * 0.5)
+		draw_set_transform(r.pos.round(), r.age * (30.0 if r.saw else 18.0))
+		draw_texture(tex, -tex.get_size() * 0.5, Color(0.75, 1.25, 1.4) if r.saw else Color.WHITE)
+		if r.saw:
+			# 锯齿：转起来的四个亮点
+			for k in 4:
+				draw_rect(Rect2(Vector2.from_angle(TAU * k / 4.0) * 5.0 - Vector2(1, 1), Vector2(2, 2)), Color("#e0fbff"))
 	draw_set_transform(Vector2.ZERO)
 	for t in traces:
 		var c := t.edge
@@ -764,6 +846,8 @@ func _draw_lob(l: Lob) -> void:
 	match l.kind:
 		"grenade":
 			color = Color("#c8c070")
+		"thermite":
+			color = Color("#ff8040")
 		"sticky":
 			color = Color("#70d040")
 		"flash":
@@ -785,6 +869,9 @@ func _draw_bomb(b: Bomb) -> void:
 			draw_rect(Rect2(at - Vector2(1, 1), Vector2(2, 2)), Color("#ff4030") if blink else Color("#a0ff60"))
 		"flash":
 			draw_rect(Rect2(at - Vector2(1, 1), Vector2(3, 3)), Color.WHITE if blink else Color("#b0b0a8"))
+		"ice":
+			draw_rect(Rect2(at - Vector2(2, 2), Vector2(4, 4)), Color("#3c7aa0"))
+			draw_rect(Rect2(at - Vector2(1, 1), Vector2(2, 2)), Color("#ffffff") if blink else Color("#a8ecff"))
 		_:
 			draw_rect(Rect2(at - Vector2(2, 1), Vector2(4, 3)), Color("#48522c"))
 			draw_rect(Rect2(at - Vector2(0, 2), Vector2(1, 1)), Color("#ff5030") if blink else Color("#f0d050"))

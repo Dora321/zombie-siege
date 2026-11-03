@@ -22,11 +22,11 @@ const MOVE_WARN := {
 	"burrow": 0.5, "emerge_slam": 0.7, "reflect_aura": 1.0,
 }
 ## 覆甲阈值不管这些来源：爆炸、狙击、回旋镖、霰弹（整枪算一次爆发）、核弹、脚本直接扣血。
-const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "buckshot", "nuke", ""]
+const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "saw", "buckshot", "nuke", ""]
 ## 钻在地下时，这些直射打不到它（子弹从土堆上飞过去）。
-const DIRECT: Array[String] = ["bullet", "buckshot", "beam", "rang", "arc"]
-## 镜面的克制：这些不看朝向；直射从背后打进来也算。
-const MIRROR_WEAK: Array[String] = ["arc", "blast", "tick"]
+const DIRECT: Array[String] = ["bullet", "buckshot", "beam", "rang", "saw", "arc"]
+## 镜面的克制：这些不看朝向（saw 是锯刃回旋，镜子弹不回）；直射从背后打进来也算。
+const MIRROR_WEAK: Array[String] = ["arc", "blast", "tick", "saw"]
 const MIRROR_BACK: Array[String] = ["bullet", "buckshot", "beam"]
 const BURROW_SPEED := 1.3
 const BURROW_REACH := 400.0
@@ -167,7 +167,7 @@ func _apply_phase(z: Variant) -> void:
 	_enter = String(p.get("enter", ""))
 
 
-## src 是伤害来源：bullet/buckshot/beam/arc/rang/blast/tick/nuke，脚本直接扣血是空串。
+## src 是伤害来源：bullet/buckshot/beam/arc/rang/saw/blast/tick/nuke，脚本直接扣血是空串。
 func absorb(z: Variant, amount: float, src := "") -> float:
 	if changing_t > 0.0:
 		return 0.0
@@ -324,7 +324,7 @@ func _tick_regen(z: Variant, dt: float) -> void:
 
 ## 镜面女皇：正面的子弹和狙击弹回去，反射光环期间连背后的直射也弹。返回 true 表示这一发被弹掉了。
 func reflect_shot(z: Variant, dir: Vector2, damage: float, src: String, from_player: bool) -> bool:
-	if not bool(spec.get("reflect", false)) or changing_t > 0.0 or z.incapacitated() or not DIRECT.has(src) or src == "arc":
+	if not bool(spec.get("reflect", false)) or changing_t > 0.0 or z.incapacitated() or not DIRECT.has(src) or src == "arc" or src == "saw":
 		return false
 	var aura := aura_t > 0.0
 	if not aura and (src == "rang" or dir.dot(face) >= MIRROR_FRONT):

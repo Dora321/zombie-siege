@@ -257,7 +257,8 @@ func _manage_reload(p: Variant) -> void:
 
 ## 商店策略：先救急，再炮塔和升级，新武器和道具排在基础防御后面，剩余钱补弹药。
 func shop() -> void:
-	var priorities := ["repair", "heal", "base_repair", "ammo_smg", "turret", "up_smg", "up_arc", "up_pistol",
+	var priorities := ["repair", "heal", "base_repair", "ammo_smg", "turret", "up_smg", "up_arc", "evo_arc", "evo_sniper", "evo_grenade",
+		"evo_cryo", "evo_boomerang", "up_pistol",
 		"item_frag", "slots", "up_flamer", "reinforce", "up_sniper", "item_medkit", "up_grenade", "up_cryo", "up_boomerang",
 		"item_armor", "up_shotgun", "turret_up", "max_hp", "item_flash", "item_sticky", "item_decoy", "ammo_shotgun",
 		"item_damage", "item_speed", "item_inf_ammo", "item_ammo_crate", "item_nuke", "boots", "dash", "magnet"]

@@ -921,6 +921,7 @@ func _flow_arena(g: Variant) -> void:
 	await _arena_burrowlord(g)
 	await _arena_mirror(g)
 	await _arena_elements(g)
+	await _arena_evolutions(g)
 	await _arena_overlord_shield(g)
 	await _arena_boss_loot(g)
 	await _arena_specials(g)
@@ -2438,6 +2439,270 @@ func _arena_elements(g: Variant) -> void:
 	_check(shield.hp < hp0, "淬火后正面子弹打得穿盾（%.1f）" % (hp0 - shield.hp))
 	shield._quench_t = 0.0
 	_check(shield.blocks_shot(Vector2.RIGHT), "淬火结束盾又挡得住")
+
+
+## 找出商店里某个 id 的商品，没有返回空字典。
+func _shop_row(g: Variant, id: String) -> Dictionary:
+	for it: Dictionary in g.shop_items():
+		if it["id"] == id:
+			return it
+	return {}
+
+
+## 武器进化：满级 + 条件 → 商店里「进化」，原地变种不占枪袋；五种各打一类题，逐一对比进化前后。
+func _arena_evolutions(g: Variant) -> void:
+	await _arena_reset(g)
+	var p: Variant = g.player
+	var saved_state := {}
+	for id: String in GameData.WEAPON_ORDER:
+		saved_state[id] = p.weapon_state[id].duplicate()
+	var saved_items: Dictionary = p.items.duplicate()
+	var saved_kills: Dictionary = g.kind_kills.duplicate()
+	var bases: Array[String] = []
+	for evo: String in GameData.EVOLUTIONS.keys():
+		bases.append(String(GameData.EVOLUTIONS[evo]["base"]))
+	_check(bases.size() >= 4 and GameData.evolution_of("pistol") == "", "进化配方 %d 条，手枪没有进化" % bases.size())
+	# 没满级不出现进化
+	_check(_shop_row(g, "evo_cryo").is_empty(), "没满级的枪商店里没有进化")
+	for id: String in bases:
+		while int(p.weapon_state[id]["level"]) < GameData.MAX_WEAPON_LEVEL:
+			p.upgrade_weapon(id)
+	g.coins = 5000
+	for k: String in p.items.keys():
+		p.items[k] = 0
+	p.used_items.clear()
+	g.kind_kills.clear()
+	var bag: int = p.loadout.size()
+	# 条件不够：按钮灰掉，写清还差什么
+	var row: Dictionary = _shop_row(g, "evo_cryo")
+	_check(not row.is_empty() and bool(row["locked"]) and String(row["desc"]).contains("粘性炸弹"), "满级冰冻枪缺粘弹时进化锁住：%s" % row.get("desc", ""))
+	_check(not g.shop_buy("evo_cryo") and p.evolution("cryo") == "", "条件不够进化不了")
+	row = _shop_row(g, "evo_sniper")
+	_check(bool(row["locked"]) and String(row["desc"]).contains("0/8"), "穿甲狙击写着击杀进度：%s" % row["desc"])
+	# 商店界面：进化按钮和花费
+	p.items["sticky"] = 2
+	g.shop_ui.open()
+	g.shop_ui._select_tab(Shop.TAB_WEAPON)
+	await _sec(0.05)
+	var btn: Button = g.shop_ui._buttons.get("evo_cryo")
+	_check(btn != null and not btn.disabled and btn.text == "进化 %d" % GameData.EVOLVE_COST, "满级且有粘弹时商店出现「进化」按钮（%s）" % (btn.text if btn != null else "无"))
+	await _shot("99_shop_evolve")
+	# 冰封雷：消耗 1 粘弹，花进化费，原地变种
+	var coins0: int = g.coins
+	_check(g.shop_buy("evo_cryo") and p.evolution("cryo") == "frost_mine", "冰冻枪进化成冰封雷")
+	_check(int(p.items["sticky"]) == 1 and g.coins == coins0 - GameData.EVOLVE_COST, "进化扣 1 粘弹和 %d 金币" % GameData.EVOLVE_COST)
+	_check(p.loadout.size() == bag and p.weapon_name("cryo") == "冰封雷", "进化不占枪袋，名字变成冰封雷")
+	g.shop_ui.refresh()
+	await _sec(0.05)
+	btn = g.shop_ui._buttons.get("up_cryo")
+	_check(btn != null and btn.disabled and btn.text == "已进化", "进化后按钮写着已进化")
+	_check(not g.shop_buy("evo_cryo") and not g.shop_buy("up_cryo"), "进化过不能再进化")
+	await _shot("99_shop_evolved")
+	g.shop_ui.close()
+	# 锯刃回旋：带着伤害药水或本局用过，不扣
+	_check(bool(_shop_row(g, "evo_boomerang")["locked"]), "没有伤害药水不能进化锯刃回旋")
+	p.used_items["damage"] = 1
+	_check(g.shop_buy("evo_boomerang") and p.evolution("boomerang") == "saw_rang", "本局用过伤害药水就能进化锯刃回旋")
+	# 避雷针：消耗 1 诱饵
+	p.items["decoy"] = 1
+	_check(g.shop_buy("evo_arc") and p.evolution("arc") == "storm_rod" and int(p.items["decoy"]) == 0, "消耗 1 诱饵进化避雷针")
+	# 铝热榴弹：消耗 1 手雷
+	_check(not g.shop_buy("evo_grenade"), "没手雷不能进化铝热榴弹")
+	p.items["frag"] = 2
+	_check(g.shop_buy("evo_grenade") and p.evolution("grenade") == "thermite" and int(p.items["frag"]) == 1, "消耗 1 手雷进化铝热榴弹")
+	# 穿甲狙击：本局击杀够 8 只坦克/护盾兵/巨像就不用粘弹
+	p.items["sticky"] = 0
+	g.kind_kills = {"tank": 5, "shielder": 3}
+	_check(g.shop_buy("evo_sniper") and p.evolution("sniper") == "puncturer", "击杀 8 只重甲后不用粘弹就能进化穿甲狙击")
+	await _evo_frost_mine(g, saved_state)
+	await _evo_saw(g, saved_state)
+	await _evo_rod(g)
+	await _evo_thermite(g)
+	await _evo_puncturer(g, saved_state)
+	# 还原：后面的用例按原来的等级和道具算
+	for id: String in GameData.WEAPON_ORDER:
+		p.weapon_state[id] = saved_state[id]
+		p._refresh_stats(id)
+	p.items = saved_items
+	p.used_items.clear()
+	g.kind_kills = saved_kills
+	p.switch_weapon("pistol")
+
+
+## 冰封雷：一发冰弹在目标身上挂冰雷，炸开时旁边没被打到的也上冰。
+func _evo_frost_mine(g: Variant, saved: Dictionary) -> void:
+	var p: Variant = g.player
+	for evolved: bool in [false, true]:
+		await _arena_reset(g)
+		p.weapon_state["cryo"]["evo"] = "frost_mine" if evolved else ""
+		var target: Node2D = _arena_spawn(g, "tank", Vector2(60, 0))
+		var side: Node2D = _arena_spawn(g, "tank", Vector2(66, 22))
+		await _sec(0.02)
+		for z: Node2D in [target, side]:
+			z.stun(5.0)
+		p.weapon_state["cryo"]["mag"] = 30
+		_test_bot.aim_dir = (target.center() - (p.position + Vector2(0, -p.HAND_H))).normalized()
+		await _hold_fire(g, "cryo", 0.03)
+		await _sec(0.25)
+		var mines := 0
+		for b: Variant in g.ordnance.bombs:
+			if b.kind == "ice":
+				mines += 1
+		await _sec(GameData.FROST_MINE_FUSE + 0.1)
+		if evolved:
+			_check(mines == 1, "冰封雷命中挂上一颗冰雷")
+			_check(side._chill_t > 0.0 and side.hp < side.max_hp, "冰雷炸开，旁边没挨打的也上冰受伤")
+			await _shot("99_frost_mine")
+		else:
+			_check(mines == 0 and side._chill_t <= 0.0, "没进化的冰冻枪只冻打中的那只")
+	p.weapon_state["cryo"]["evo"] = "frost_mine"
+
+
+## 锯刃回旋：正面锯穿护盾兵，反射光环也弹不回。
+func _evo_saw(g: Variant, saved: Dictionary) -> void:
+	var p: Variant = g.player
+	await _arena_reset(g)
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	var guard: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
+	await _sec(0.05)
+	guard.max_hp = 3000.0
+	guard.hp = 3000.0
+	guard._brain.face = Vector2.LEFT
+	var dmg: float = float(p.stats["boomerang"]["damage"])
+	g.ordnance.boomerang(from, from.direction_to(guard.center()), 260.0, 150.0, dmg, 0.0, false)
+	await _sec(0.4)
+	_check(guard.hp == guard.max_hp, "普通回旋镖打护盾兵正面被挡")
+	g.ordnance.rangs.clear()
+	p.weapon_state["boomerang"]["mag"] = int(p.stats["boomerang"]["mag"])
+	# 上一镖已经磨掉不少盾，补满免得这一下直接锯碎
+	guard._brain.shield_hp = 999.0
+	var shield0: float = guard._brain.shield_hp
+	_cue_ready(guard)
+	var weak0 := _cues(g, "弱点！")
+	guard._brain.face = Vector2.LEFT
+	_test_bot.aim_dir = from.direction_to(guard.center())
+	await _hold_fire(g, "boomerang", 0.03)
+	await _sec(0.4)
+	var loss: float = guard.max_hp - guard.hp
+	_check(loss >= dmg * GameData.SAW_MULT * 0.99, "锯刃回旋正面锯穿盾牌，伤害 +25%%（%.1f / %.1f）" % [loss, dmg * GameData.SAW_MULT])
+	_check(guard._brain.shield_hp < shield0 and _cues(g, "弱点！") > weak0, "锯过盾牌顺带磨盾并飘「弱点！」")
+	await _shot("99_saw_rang")
+	# 镜面女皇的反射光环：普通回旋镖被弹回，锯刃照样打进去。先收回还在飞的锯刃
+	g.ordnance.rangs.clear()
+	p.weapon_state["boomerang"]["mag"] = int(p.stats["boomerang"]["mag"])
+	var z: Node2D = await _boss_setup(g, "mirror", 2, Vector2(70, 0))
+	z._brain.aura_t = 10.0
+	var reflect0 := int(z._brain.stats.get("reflect", 0))
+	g.ordnance.boomerang(from, from.direction_to(z.center()), 260.0, 150.0, dmg, 0.0, false)
+	await _sec(0.4)
+	_check(z.hp == z.max_hp and int(z._brain.stats.get("reflect", 0)) > reflect0, "反射光环把普通回旋镖弹回来")
+	g.ordnance.rangs.clear()
+	reflect0 = int(z._brain.stats.get("reflect", 0))
+	g.ordnance.boomerang(from, from.direction_to(z.center()), 260.0, 150.0, dmg * GameData.SAW_MULT, 0.0, true)
+	await _sec(0.4)
+	_check(z.hp < z.max_hp and int(z._brain.stats.get("reflect", 0)) == reflect0, "锯刃回旋镜子弹不回（%.1f）" % (z.max_hp - z.hp))
+	g.ordnance.rangs.clear()
+	p.weapon_state["boomerang"]["mag"] = int(p.stats["boomerang"]["mag"])
+
+
+## 避雷针：前方有诱饵时电弧先打诱饵，再从诱饵连到围着它的尸群；湿身再乘 1.25。
+func _evo_rod(g: Variant) -> void:
+	var p: Variant = g.player
+	await _arena_reset(g)
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	var s: Dictionary = p.stats["arc"]
+	g.ordnance.lob("decoy", from, from + Vector2(130, 0), 8.0, 0.0)
+	await _sec(1.0)
+	var pack := [_arena_spawn(g, "tank", Vector2(178, 0)), _arena_spawn(g, "tank", Vector2(186, 18)), _arena_spawn(g, "tank", Vector2(190, -16))]
+	await _sec(0.02)
+	for z: Node2D in pack:
+		z.stun(5.0)
+	g.ordnance.arc(from, Vector2.RIGHT, float(s["range"]), 20.0, int(s["chain"]), float(s["jump"]), 0.0, false)
+	var hurt := 0
+	for z: Node2D in pack:
+		if _hurt(z):
+			hurt += 1
+	_check(hurt == 0, "普通电弧够不着射程外围着诱饵的尸群")
+	p.weapon_state["arc"]["mag"] = 24
+	_test_bot.aim_dir = Vector2.RIGHT
+	await _hold_fire(g, "arc", 0.03)
+	hurt = 0
+	for z: Node2D in pack:
+		if _hurt(z):
+			hurt += 1
+	_check(hurt == pack.size(), "避雷针打到导电诱饵，连到它周围的尸群（%d/%d）" % [hurt, pack.size()])
+	await _shot("99_storm_rod")
+	await _arena_reset(g)
+	var wet: Node2D = _arena_spawn(g, "tank", Vector2(60, 0))
+	await _sec(0.02)
+	wet.stun(2.0)
+	wet.soak(5.0)
+	g.ordnance.arc(from, from.direction_to(wet.center()), 150.0, 20.0, 0, 1.0, 0.0, true)
+	var want: float = 20.0 * GameData.ROD_FIRST * GameData.WET_ARC * GameData.ROD_WET
+	_check(absf(wet.max_hp - wet.hp - want) < 0.1, "避雷针首跳打湿身 ×%.1f（%.1f / %.1f）" % [want / 20.0, wet.max_hp - wet.hp, want])
+
+
+## 铝热榴弹：落点一圈火烧得比普通火久，爆炸打坦克 +20%，打普通僵尸不变。
+func _evo_thermite(g: Variant) -> void:
+	var p: Variant = g.player
+	await _arena_reset(g)
+	# 两只隔开 60 像素，一次爆炸只炸到一只
+	var tanks := [_arena_spawn(g, "tank", Vector2(40, -30)), _arena_spawn(g, "tank", Vector2(40, 30))]
+	var walkers := [_arena_spawn(g, "walker", Vector2(150, -30)), _arena_spawn(g, "walker", Vector2(150, 30))]
+	await _sec(0.02)
+	for z: Node2D in tanks + walkers:
+		z.stun(5.0)
+		z.max_hp = 2000.0
+		z.hp = 2000.0
+	for i in 2:
+		g.explode(tanks[i].center() + Vector2(4, 0), 30.0, 40.0, true, true, GameData.THERMITE_HEAVY if i == 1 else 1.0)
+		g.explode(walkers[i].center() + Vector2(4, 0), 30.0, 40.0, true, true, GameData.THERMITE_HEAVY if i == 1 else 1.0)
+	_check(absf((tanks[1].max_hp - tanks[1].hp) / (tanks[0].max_hp - tanks[0].hp) - GameData.THERMITE_HEAVY) < 0.02, "铝热爆炸打坦克 ×%.1f" % GameData.THERMITE_HEAVY)
+	_check(absf((walkers[1].max_hp - walkers[1].hp) - (walkers[0].max_hp - walkers[0].hp)) < 0.05, "铝热爆炸打普通僵尸不加成")
+	await _arena_reset(g)
+	p.weapon_state["grenade"]["mag"] = 4
+	_test_bot.aim_point = p.position + Vector2(90, -7)
+	await _hold_fire(g, "grenade", 0.03)
+	await _sec(0.9)
+	var long_fires := 0
+	for f: Variant in g.ordnance.fires:
+		if f.t > g.ordnance.FIRE_TIME:
+			long_fires += 1
+	_check(long_fires >= 3, "铝热榴弹落地留下一圈久烧的火（%d 团）" % long_fires)
+	await _shot("99_thermite")
+
+
+## 穿甲狙击：正面打护盾兵不再减半，打重甲再 +20%。
+func _evo_puncturer(g: Variant, saved: Dictionary) -> void:
+	var p: Variant = g.player
+	await _arena_reset(g)
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	var guard: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
+	await _sec(0.05)
+	guard.max_hp = 5000.0
+	guard.hp = 5000.0
+	guard._brain.shield_hp = 99999.0
+	guard._brain.face = Vector2.LEFT
+	g.ordnance.beam(from, from.direction_to(guard.center()), 520.0, 40.0, 0.0, 0, false)
+	var plain: float = guard.max_hp - guard.hp
+	_check(absf(plain - 40.0 * 0.5) < 0.05, "普通狙击穿盾减半（%.1f）" % plain)
+	var hp0: float = guard.hp
+	guard._brain.face = Vector2.LEFT
+	p.weapon_state["sniper"]["mag"] = 5
+	_test_bot.aim_dir = from.direction_to(guard.center())
+	await _hold_fire(g, "sniper", 0.03)
+	var dmg: float = float(p.stats["sniper"]["damage"])
+	_check(absf(hp0 - guard.hp - dmg * GameData.PUNCTURE_MULT) < 0.5, "穿甲狙击正面穿盾不减半还 +20%%（%.1f / %.1f）" % [hp0 - guard.hp, dmg * GameData.PUNCTURE_MULT])
+	await _arena_reset(g)
+	var tank: Node2D = _arena_spawn(g, "tank", Vector2(70, -20))
+	var walker: Node2D = _arena_spawn(g, "walker", Vector2(70, 20))
+	await _sec(0.02)
+	for z: Node2D in [tank, walker]:
+		z.stun(3.0)
+		z.max_hp = 2000.0
+		z.hp = 2000.0
+		g.ordnance.beam(from, from.direction_to(z.center()), 520.0, 40.0, 0.0, 0, true)
+	_check(absf(tank.max_hp - tank.hp - 40.0 * GameData.PUNCTURE_MULT) < 0.05 and absf(walker.max_hp - walker.hp - 40.0) < 0.05, "穿甲狙击打坦克 +20%，打普通僵尸不变")
 
 
 ## 用真实的开火路径对着 Boss 开一枪霰弹。

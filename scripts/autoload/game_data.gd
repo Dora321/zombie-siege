@@ -90,6 +90,52 @@ const WEAPONS := {
 	},
 }
 
+## 武器进化：满级的枪满足 need 后在商店花 EVOLVE_COST 原地进化（同一把枪，不占枪袋），每种专克一类题。
+## need.item 是要带着的道具，consume 是进化时扣几个（0 表示带着就行）；used 为 true 时本局用过这种道具也算；
+## kills 是本局击杀 kinds 的累计数，够 count 也算。走 used 或 kills 的不扣道具。开火分支见 player._fire_mode。
+const EVOLVE_COST := 50
+const EVOLUTIONS := {
+	"frost_mine": {
+		"base": "cryo", "name": "冰封雷", "counter": "群体控场：尸潮、尖叫加速、再生",
+		"desc": "冰弹留雷，片刻后炸开冻一圈", "need": {"item": "sticky", "consume": 1},
+	},
+	"saw_rang": {
+		"base": "boomerang", "name": "锯刃回旋", "counter": "护盾兵正面、镜面女皇",
+		"desc": "伤害 +25%，锯穿盾牌，镜子弹不回", "need": {"item": "damage", "consume": 0, "used": true},
+	},
+	"storm_rod": {
+		"base": "arc", "name": "避雷针", "counter": "密集尸群、暴雨波",
+		"desc": "首跳 +20%，湿身更痛，诱饵引雷", "need": {"item": "decoy", "consume": 1},
+	},
+	"thermite": {
+		"base": "grenade", "name": "铝热榴弹", "counter": "覆甲巨像、坦克",
+		"desc": "炸开留一圈久烧的火，打重甲 +20%", "need": {"item": "frag", "consume": 1, "used": true},
+	},
+	"puncturer": {
+		"base": "sniper", "name": "穿甲狙击", "counter": "铁壁波、护盾兵、覆甲巨像",
+		"desc": "穿盾不减伤，打重甲 +20%",
+		"need": {"item": "sticky", "consume": 1, "kills": {"kinds": ["tank", "shielder", "colossus"], "count": 8}},
+	},
+}
+## 冰封雷：每只身上同时只挂一颗，FUSE 秒后在它身上炸开，半径内全体上冰，伤害是这发冰弹的倍数。
+const FROST_MINE_FUSE := 0.6
+const FROST_MINE_R := 30.0
+const FROST_MINE_CHILL := 0.55
+const FROST_MINE_DAMAGE := 1.5
+## 锯刃回旋：伤害倍率；正面锯过盾牌时顺带磨掉的盾耐久（按这一下伤害的比例）。
+const SAW_MULT := 1.25
+const SAW_SHIELD_WEAR := 0.5
+## 避雷针：首跳加成、湿身再乘的倍率；导电诱饵在射程内且大致在前方时电弧先打到诱饵，再从诱饵多连几跳。
+const ROD_FIRST := 1.2
+const ROD_WET := 1.25
+const ROD_DECOY_CHAIN := 2
+## 铝热榴弹：落点留几团火、每团烧多久，对坦克和覆甲 Boss 的加成。
+const THERMITE_FIRES := 6
+const THERMITE_FIRE_TIME := 6.0
+const THERMITE_HEAVY := 1.2
+## 穿甲狙击：打坦克、举盾的护盾兵和覆甲 Boss 的加成；穿盾也不再减半。
+const PUNCTURE_MULT := 1.2
+
 ## 冰冻和燃烧的数值。
 const CHILL_SLOW := 0.5
 const CHILL_SLOW_BOSS := 0.7
@@ -515,6 +561,14 @@ func weapon_stats(id: String, level: int) -> Dictionary:
 			s["mag"] = 1 + l / 2
 			s["range"] = float(s["range"]) + 10.0 * l
 	return s
+
+
+## 这把枪能进化成什么，没有返回空串。
+func evolution_of(weapon: String) -> String:
+	for id: String in EVOLUTIONS.keys():
+		if EVOLUTIONS[id]["base"] == weapon:
+			return id
+	return ""
 
 
 ## level 为 0 表示还没解锁，这时返回解锁价。
