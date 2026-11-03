@@ -114,6 +114,14 @@ class Shielder extends "res://scripts/game/zombie_brain.gd":
 	func blocks(z: Variant, dir: Vector2) -> bool:
 		return up and not z.incapacitated() and dir.dot(face) < FRONT
 
+	## 举着盾还挨了打：绕后或盾放下了的直射，或者不看朝向的爆炸、火焰、电弧。狙击穿盾的半伤不算。
+	func weak_hit(z: Variant, src: String, dir: Vector2) -> bool:
+		if not up:
+			return false
+		if src == "blast" or src == "tick" or src == "arc":
+			return true
+		return (src == "bullet" or src == "buckshot" or src == "beam" or src == "rang") and not blocks(z, dir)
+
 	func shield_hit(z: Variant, amount: float) -> void:
 		if not up:
 			return

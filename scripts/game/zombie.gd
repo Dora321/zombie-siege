@@ -5,6 +5,11 @@ const BOX_R := 5.0
 ## 超过这个数值的伤害只来自脚本清场：无视阶段和护盾，也不分裂、不掉战利品。
 const KILL_DAMAGE := 90000.0
 const RALLY_SPEED := 1.5
+## 克制反馈飘字：同一只身上 CUE_GAP 秒内只飘一个字，同一个字要等上一个飘远了（CUE_REPEAT）再出，免得冲锋枪刷屏。
+const CUE_GAP := 0.25
+const CUE_REPEAT := 0.8
+const CUE_DING := Color("#c8d0dc")
+const CUE_WEAK := Color("#ffa040")
 const Elites := preload("res://scripts/game/elite_brains.gd")
 const BossBrain := preload("res://scripts/game/boss_brain.gd")
 
@@ -83,6 +88,10 @@ var _ember_t := 0.0
 var _status_key := 0
 # 诱饵
 var _lure: Variant = null
+# 克制反馈飘字的节流
+var _cue_t := 0.0
+var _cue_last := ""
+var _cue_last_t := 0.0
 
 @onready var body: Sprite2D = $Body
 @onready var shadow: Sprite2D = $Shadow
@@ -159,6 +168,8 @@ func _physics_process(dt: float) -> void:
 	_think_t -= dt
 	_warn_t -= dt
 	_rally_t -= dt
+	_cue_t -= dt
+	_cue_last_t -= dt
 	_lunge = _lunge.lerp(Vector2.ZERO, clampf(16.0 * dt, 0.0, 1.0))
 	_tick_status(dt)
 	if dead:
@@ -241,6 +252,17 @@ func shield_hit(amount: float) -> void:
 func buckshot_hit(knock: float) -> void:
 	if _brain != null and not dead:
 		_brain.on_buckshot(self, knock)
+
+
+## 头顶飘一个克制反馈字：灰色「叮」是被挡住了，橙色「弱点！」是打对了。
+func cue(text: String, color: Color, repeat := CUE_REPEAT) -> void:
+	if _cue_t > 0.0 or (text == _cue_last and _cue_last_t > 0.0):
+		return
+	_cue_t = CUE_GAP
+	_cue_last = text
+	_cue_last_t = repeat
+	game.fx.text(position + Vector2(0, -center_h * 2.0 - 8.0), text, color)
+	game.count_cue(text)
 
 
 func flash_warn(seconds: float) -> void:
@@ -541,6 +563,9 @@ func take_tick(amount: float) -> void:
 	var dealt := amount * vulnerability()
 	if _brain != null:
 		dealt = _brain.absorb(self, dealt, "tick")
+		# 火每帧都在烧，弱点字隔久一点
+		if dealt > 0.0 and _brain.weak_hit(self, "tick", Vector2.ZERO):
+			cue("弱点！", CUE_WEAK, CUE_REPEAT * 2.0)
 	hp -= dealt
 	_dot_shown += dealt
 	if _dot_shown >= 10.0:
@@ -588,6 +613,7 @@ func _tick_status(dt: float) -> void:
 func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "") -> void:
 	if dead:
 		return
+	var frozen := _frozen_t > 0.0
 	amount *= vulnerability()
 	if amount >= KILL_DAMAGE:
 		overkill = true
@@ -609,6 +635,9 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true,
 	game.fx.blood_hit(hit_pos, dir, 3 + int(amount * 0.2), Color(String(_stat["blood"])))
 	if show_number:
 		game.fx.number(hit_pos + Vector2(randf_range(-3, 3), -6), roundi(amount), Color("#ffe080") if amount < 30.0 else Color("#ffa040"))
+	# 打对了克制手段：冻住吃易伤，或者 Boss/精英自己判定（覆甲吃满额、绕后、爆炸火电）
+	if src != "" and not overkill and (frozen or (_brain != null and _brain.weak_hit(self, src, dir))):
+		cue("弱点！", CUE_WEAK)
 	if randf() < 0.3:
 		game.decals.stamp_pixel_group(position + dir * randf_range(4, 14), Color("#7c1414"), 4)
 	Sfx.play("hit", -8.0)

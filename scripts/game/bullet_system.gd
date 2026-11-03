@@ -136,6 +136,7 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 		# 护盾兵正面：子弹停在盾上，只磨耐久
 		if best.blocks_shot(dir):
 			best.shield_hit(damage)
+			best.cue("叮", best.CUE_DING)
 			game.fx.spark(best.center() - dir * float(best.hit_r))
 			return false
 		# 炮塔打被冻僵尸有额外加成，鼓励玩家先控场再让炮塔收割

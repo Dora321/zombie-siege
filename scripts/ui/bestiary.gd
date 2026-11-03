@@ -13,6 +13,7 @@ const PAGES: Array = [
 const ROW_H := 50
 const TOP := 26
 const TEXT_X := 66
+const WEAK_COLOR := Color("#ffa040")
 
 @onready var prev_button: Button = %BestiaryPrev
 @onready var next_button: Button = %BestiaryNext
@@ -92,9 +93,22 @@ func _draw_row(kind: String, y: int, row: int) -> void:
 			Art.draw_text(self, "战利品：%s（%s）" % [GameData.TROPHIES[boss["trophy"]]["name"], GameData.TROPHIES[boss["trophy"]]["desc"]], Vector2(TEXT_X, y + 39), 12, Color("#ffe080"))
 		else:
 			Art.draw_text(self, "对策：" + String(stat["tip"]), Vector2(TEXT_X, y + 39), 12, Color("#ffe080"))
+		_draw_weak(kind, Vector2(TEXT_X, y + 52))
 		return
 	Art.draw_text(self, String(stat["desc"]), Vector2(TEXT_X, y + 13), 12, Color("#e8e4d8"))
-	Art.draw_text(self, "对策：" + String(stat["tip"]), Vector2(TEXT_X, y + 26), 12, Color("#a8d8a0"))
+	var tip := "对策：" + String(stat["tip"])
+	Art.draw_text(self, tip, Vector2(TEXT_X, y + 26), 12, Color("#a8d8a0"))
+	# 一页五只时行高不够，弱点接在对策后面
+	if row >= 51:
+		_draw_weak(kind, Vector2(TEXT_X, y + 39))
+	else:
+		_draw_weak(kind, Vector2(TEXT_X + Art.font.get_string_size(tip, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 10, y + 26))
+
+
+func _draw_weak(kind: String, at: Vector2) -> void:
+	var weak := GameData.weakness(kind)
+	if weak != "":
+		Art.draw_text(self, "怕：" + weak, at, 12, WEAK_COLOR)
 
 
 func _boss_wave(kind: String) -> int:

@@ -2,9 +2,15 @@ extends Node
 ## 全局数值表：武器、道具、掉落、僵尸、波次。调平衡只需要改这里。
 
 const MAX_WAVE := 15
+## 商店情报最多列几种怪。
+const PREVIEW_KINDS := 5
 ## 顺序决定数字键：第 N 把对应按键 N。
 const WEAPON_ORDER: Array[String] = ["pistol", "shotgun", "smg", "sniper", "flamer", "grenade", "arc", "cryo", "boomerang"]
 const MAX_WEAPON_LEVEL := 5
+## 随身枪袋：开局 4 格（手枪、霰弹、冲锋占 3 格），商店扩容一次到 5 格。
+const BASE_WEAPON_SLOTS := 4
+const MAX_WEAPON_SLOTS := 5
+const SLOT_COST := 220
 
 const WEAPONS := {
 	"pistol": {
@@ -152,7 +158,7 @@ const TROPHY_BLAST_BOSS := 1.1
 const TROPHY_REFLECT := 0.5
 
 ## 僵尸属性：hit_r 是子弹判定半径，center 是身体中心离脚底的高度。
-## desc 和 tip 是图鉴文案，is_boss 的配置在 BOSSES。
+## desc 和 tip 是图鉴文案，weak 是弱点短标签（/ 分隔，图鉴和商店情报都用），is_boss 的配置在 BOSSES。
 const ZOMBIES := {
 	"walker": {
 		"name": "普通僵尸", "hp": 35.0, "speed": 28.0, "damage": 7.5, "attack_cd": 0.95,
@@ -162,12 +168,12 @@ const ZOMBIES := {
 	"runner": {
 		"name": "快跑僵尸", "hp": 18.0, "speed": 64.0, "damage": 5.5, "attack_cd": 0.55,
 		"coins": 3, "score": 15, "hit_r": 5.5, "center": 6.0, "knock_res": 0.0, "aggro": 130.0,
-		"blood": "#8c1c1c", "desc": "血薄跑得快，老远就盯上你", "tip": "冲锋枪扫，别被围",
+		"weak": "冲锋枪", "blood": "#8c1c1c", "desc": "血薄跑得快，老远就盯上你", "tip": "冲锋枪扫，别被围",
 	},
 	"tank": {
 		"name": "坦克僵尸", "hp": 250.0, "speed": 19.0, "damage": 24.0, "attack_cd": 1.25,
 		"coins": 14, "score": 60, "hit_r": 11.0, "center": 11.0, "knock_res": 0.85, "aggro": 90.0,
-		"blood": "#6e1414", "desc": "血厚不吃击退，拆墙伤害翻倍", "tip": "集火，引去炸药桶",
+		"weak": "狙击/粘弹/炸药桶", "blood": "#6e1414", "desc": "血厚不吃击退，拆墙伤害翻倍", "tip": "集火，引去炸药桶",
 	},
 	"exploder": {
 		"name": "自爆僵尸", "hp": 27.0, "speed": 40.0, "damage": 44.0, "attack_cd": 1.0,
@@ -188,13 +194,13 @@ const ZOMBIES := {
 	"shielder": {
 		"name": "护盾兵", "hp": 75.0, "speed": 24.0, "damage": 12.0, "attack_cd": 1.1,
 		"coins": 10, "score": 45, "hit_r": 7.0, "center": 9.0, "knock_res": 0.7, "aggro": 120.0,
-		"blood": "#8c1c1c", "shield": 70.0, "elite": true,
+		"weak": "绕后/爆炸/火焰/电弧/眩晕", "blood": "#8c1c1c", "shield": 70.0, "elite": true,
 		"desc": "盾牌挡下正面子弹，盾转得慢", "tip": "绕后，或用爆炸、火焰、电弧、眩晕",
 	},
 	"splitter": {
 		"name": "分裂体", "hp": 84.0, "speed": 26.0, "damage": 10.0, "attack_cd": 1.0,
 		"coins": 7, "score": 35, "hit_r": 9.0, "center": 9.0, "knock_res": 0.3, "aggro": 90.0,
-		"blood": "#6a9c30", "split": 3, "elite": true,
+		"weak": "榴弹/电弧/火焰", "blood": "#6a9c30", "split": 3, "elite": true,
 		"desc": "死后裂成 2~3 只快跑的小怪", "tip": "留一发范围武器收拾小怪",
 	},
 	"splitling": {
@@ -205,7 +211,7 @@ const ZOMBIES := {
 	"summoner": {
 		"name": "召唤者", "hp": 62.0, "speed": 22.0, "damage": 7.0, "attack_cd": 1.2,
 		"coins": 12, "score": 60, "hit_r": 6.5, "center": 10.0, "knock_res": 0.1, "aggro": 170.0,
-		"blood": "#5a2a8a", "elite": true,
+		"weak": "狙击/集火本体", "blood": "#5a2a8a", "elite": true,
 		"desc": "躲在远处吟唱，把小鬼叫到你身边", "tip": "直接打它，它一死小鬼全散",
 	},
 	"imp": {
@@ -216,59 +222,59 @@ const ZOMBIES := {
 	"screamer": {
 		"name": "尖叫者", "hp": 52.0, "speed": 32.0, "damage": 6.0, "attack_cd": 1.0,
 		"coins": 10, "score": 50, "hit_r": 6.0, "center": 9.0, "knock_res": 0.1, "aggro": 150.0,
-		"blood": "#8c1c4c", "elite": true,
+		"weak": "眩晕/冰冻/集火", "blood": "#8c1c4c", "elite": true,
 		"desc": "尖叫让周围僵尸加速冲向你或基地", "tip": "蓄力时发抖，趁机打断或击杀",
 	},
 	"balloon": {
 		"name": "气球僵尸", "hp": 40.0, "speed": 33.0, "damage": 18.0, "attack_cd": 2.6,
 		"coins": 9, "score": 40, "hit_r": 9.0, "center": 28.0, "knock_res": 0.0, "aggro": 190.0,
-		"blood": "#8c1c1c", "flying": true, "elite": true,
+		"weak": "冲锋枪/电弧", "blood": "#8c1c1c", "flying": true, "elite": true,
 		"desc": "飘过围墙，在头顶投下毒弹", "tip": "打爆气球会摔下一只半血僵尸",
 	},
 	"vanguard": {
 		"name": "裂颚先锋", "hp": 420.0, "speed": 26.0, "damage": 22.0, "attack_cd": 1.2,
 		"coins": 60, "score": 250, "hit_r": 10.0, "center": 11.0, "knock_res": 0.9, "aggro": 140.0,
-		"blood": "#7a1818", "is_boss": true,
+		"weak": "任意枪/侧闪后还手", "blood": "#7a1818", "is_boss": true,
 		"desc": "屠夫的小号，会冲撞和重砸", "tip": "不用换枪，先学会躲开再还手",
 	},
 	"boss": {
 		"name": "屠夫", "hp": 900.0, "speed": 22.0, "damage": 33.0, "attack_cd": 1.3,
 		"coins": 140, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
-		"blood": "#6e1414", "is_boss": true,
+		"weak": "霰弹/闪光弹", "blood": "#6e1414", "is_boss": true,
 	},
 	"colossus": {
 		"name": "覆甲巨像", "hp": 1100.0, "speed": 18.0, "damage": 32.0, "attack_cd": 1.5,
 		"coins": 180, "score": 900, "hit_r": 16.0, "center": 16.0, "knock_res": 0.97, "aggro": 140.0,
-		"blood": "#5a4a3a", "is_boss": true,
+		"weak": "霰弹/狙击/榴弹/回旋镖/粘弹", "blood": "#5a4a3a", "is_boss": true,
 		"desc": "一身厚甲，小口径子弹几乎打不动", "tip": "小伤害无效，换霰弹、狙击、榴弹、回旋镖或粘弹",
 	},
 	"plague": {
 		"name": "瘟疫母体", "hp": 1350.0, "speed": 20.0, "damage": 28.0, "attack_cd": 1.5,
 		"coins": 240, "score": 1200, "hit_r": 16.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
-		"blood": "#5e8a20", "is_boss": true,
+		"weak": "榴弹/火焰/电弧", "blood": "#5e8a20", "is_boss": true,
 	},
 	"graveborn": {
 		"name": "再生坟主", "hp": 1500.0, "speed": 19.0, "damage": 30.0, "attack_cd": 1.4,
 		"coins": 280, "score": 1400, "hit_r": 15.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
-		"blood": "#4a5a32", "is_boss": true,
+		"weak": "冰冻/火焰", "blood": "#4a5a32", "is_boss": true,
 		"desc": "不挂冰也不着火时，每秒都在回血", "tip": "先用冰或火压住再生，再集火",
 	},
 	"burrowlord": {
 		"name": "掘地领主", "hp": 1600.0, "speed": 24.0, "damage": 32.0, "attack_cd": 1.3,
 		"coins": 320, "score": 1700, "hit_r": 15.0, "center": 13.0, "knock_res": 0.97, "aggro": 160.0,
-		"blood": "#6a4a2a", "is_boss": true,
+		"weak": "榴弹/手雷/火焰/闪光弹", "blood": "#6a4a2a", "is_boss": true,
 		"desc": "钻进地下时子弹打不到，出土就是一记重砸", "tip": "往土堆扔爆炸、喷火或闪光，把它逼出来",
 	},
 	"mirror": {
 		"name": "镜面女皇", "hp": 1800.0, "speed": 21.0, "damage": 30.0, "attack_cd": 1.3,
 		"coins": 380, "score": 2000, "hit_r": 14.0, "center": 17.0, "knock_res": 0.97, "aggro": 160.0,
-		"blood": "#5a3a6a", "is_boss": true,
+		"weak": "绕后/榴弹/电弧/火焰", "blood": "#5a3a6a", "is_boss": true,
 		"desc": "身前的镜子把子弹和狙击弹回来", "tip": "绕到背后，或用榴弹、电弧、火焰",
 	},
 	"overlord": {
 		"name": "尸王", "hp": 2700.0, "speed": 23.0, "damage": 36.0, "attack_cd": 1.3,
 		"coins": 500, "score": 3000, "hit_r": 18.0, "center": 20.0, "knock_res": 0.98, "aggro": 170.0,
-		"blood": "#4a2a6a", "is_boss": true,
+		"weak": "榴弹/火焰/电弧", "blood": "#4a2a6a", "is_boss": true,
 	},
 }
 
@@ -525,18 +531,13 @@ func roll_drop(zombie_kind: String) -> Dictionary:
 
 
 ## 把一波的配置展开成乱序的出怪队列；Boss 压轴在队列中段之后出现。
-## 当前地图的 count_scale 只缩放普通僵尸，精英是逐波设计好的。
 func build_spawn_queue(wave: int) -> Array[String]:
 	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
-	var scale := float(MAPS[Save.map_id]["count_scale"])
 	var queue: Array[String] = []
 	for kind: String in ZOMBIES.keys():
 		if is_boss(kind):
 			continue
-		var count := int(cfg.get(kind, 0))
-		if not bool(ZOMBIES[kind].get("elite", false)):
-			count = roundi(count * scale)
-		for i in count:
+		for i in spawn_count(cfg, kind):
 			queue.append(kind)
 	queue.shuffle()
 	for kind: String in BOSSES.keys():
@@ -544,6 +545,59 @@ func build_spawn_queue(wave: int) -> Array[String]:
 			var at := queue.size() / 2 + i * 12
 			queue.insert(mini(at, queue.size()), kind)
 	return queue
+
+
+## 一波里某种杂兵出几只。当前地图的 count_scale 只缩放普通僵尸，精英是逐波设计好的。
+func spawn_count(cfg: Dictionary, kind: String) -> int:
+	var count := int(cfg.get(kind, 0))
+	if not bool(ZOMBIES[kind].get("elite", false)):
+		count = roundi(count * float(MAPS[Save.map_id]["count_scale"]))
+	return count
+
+
+## 商店情报：这一波叫什么、提示、有哪些怪（最多 5 项，多的并成「其他」）、Boss 是谁。
+## 有弱点标签的怪（精英、坦克）优先列出，普通杂兵按数量补齐。
+func wave_preview(wave: int) -> Dictionary:
+	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
+	var boss_kind := ""
+	var all: Array = []
+	for kind: String in ZOMBIES.keys():
+		if is_boss(kind):
+			if cfg.has(kind):
+				boss_kind = kind
+			continue
+		var n := spawn_count(cfg, kind)
+		if n > 0:
+			all.append({"id": kind, "name": short_name(kind), "count": n, "weak": String(ZOMBIES[kind].get("weak", ""))})
+	var ranked := all.duplicate()
+	ranked.sort_custom(func(a, b):
+		if (a["weak"] != "") != (b["weak"] != ""):
+			return a["weak"] != ""
+		return int(a["count"]) > int(b["count"]))
+	var kinds: Array = []
+	if ranked.size() <= PREVIEW_KINDS:
+		kinds = ranked
+	else:
+		kinds = ranked.slice(0, PREVIEW_KINDS - 1)
+		var rest := 0
+		for e: Dictionary in ranked.slice(PREVIEW_KINDS - 1):
+			rest += int(e["count"])
+		kinds.append({"id": "other", "name": "其他", "count": rest, "weak": ""})
+	# 显示时按图鉴顺序排，「其他」放最后
+	var order: Array = ZOMBIES.keys()
+	kinds.sort_custom(func(a, b): return (order.find(a["id"]) if a["id"] != "other" else 999) < (order.find(b["id"]) if b["id"] != "other" else 999))
+	return {"name": wave_name(wave), "hint": wave_hint(wave), "kinds": kinds, "boss_kind": boss_kind}
+
+
+## 情报栏里的短名：去掉「僵尸」后缀，Boss 用称号。
+func short_name(kind: String) -> String:
+	if BOSSES.has(kind):
+		return String(BOSSES[kind]["title"])
+	return String(ZOMBIES[kind]["name"]).trim_suffix("僵尸")
+
+
+func weakness(kind: String) -> String:
+	return String(ZOMBIES[kind].get("weak", ""))
 
 
 func is_boss(kind: String) -> bool:

@@ -423,6 +423,7 @@ func _step_rang(r: Rang, dt: float) -> bool:
 				continue
 			if z.blocks_shot(r.dir):
 				z.shield_hit(r.damage)
+				z.cue("叮", z.CUE_DING)
 				game.fx.spark(r.pos)
 				continue
 			z.take_damage(r.damage, r.dir, r.knock, true, "rang")

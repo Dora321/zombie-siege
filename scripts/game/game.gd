@@ -58,6 +58,8 @@ var god_mode := false
 var victory := false
 var end_reason := ""
 var result_rank := 0
+## 克制反馈飘字（叮、弱点！……）各出现了几次，机器人日志和测试看这个。
+var cue_stats := {}
 
 var player: Node2D
 var base: Node2D
@@ -589,6 +591,10 @@ func grant_ammo_box() -> void:
 		if int(st["reserve"]) >= 0:
 			st["reserve"] = int(st["reserve"]) + int(GameData.WEAPONS[id].get("ammo_drop", 0))
 	fx.text(player.position + Vector2(0, -22), "弹药补给", Color("#c8e070"))
+
+
+func count_cue(text: String) -> void:
+	cue_stats[text] = int(cue_stats.get(text, 0)) + 1
 
 
 func on_bullet_hit() -> void:

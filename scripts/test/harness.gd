@@ -6,7 +6,8 @@ extends Node
 ##   godot --path . -- --shots=DIR                                  窗口模式下自动截图
 ##   godot --path . --fixed-fps 60 -- --flowtest --flowshots=DIR    流程测试并给新武器道具截图
 ##   godot --headless --path . --fixed-fps 60 -- --maptest --seed=1 三张地图和全部随机事件的校验
-## 机器人和截图模式可加 --map=parking|alley 选图，--event=night 等每波固定事件，--noevents 关事件
+## 机器人和截图模式可加 --map=parking|alley 选图，--event=night 等每波固定事件，--noevents 关事件，
+## --holdshop 让机器人买完东西停在商店（网页截图看商店用）
 
 const BotScript := preload("res://scripts/test/bot.gd")
 const Shop := preload("res://scripts/game/shop_catalog.gd")
@@ -115,6 +116,11 @@ func _start_from_title(title: Node) -> void:
 			for kind: String in page["kinds"]:
 				shown[kind] = true
 		_check(shown.size() == GameData.ZOMBIES.size(), "图鉴收录全部敌人（%d/%d）" % [shown.size(), GameData.ZOMBIES.size()])
+		var no_weak: Array[String] = []
+		for kind: String in ["shielder", "colossus", "graveborn", "burrowlord", "mirror", "plague", "boss", "overlord", "tank", "balloon", "summoner", "screamer", "vanguard"]:
+			if GameData.weakness(kind) == "":
+				no_weak.append(kind)
+		_check(no_weak.is_empty(), "精英和 Boss 都有弱点标签 %s" % [no_weak])
 		for i in title.bestiary_panel.PAGES.size():
 			if _shots_dir != "":
 				await _sec(0.1)
@@ -162,6 +168,9 @@ func on_shop_open(game: Node) -> void:
 			_shots_shop()
 			return
 		bot.shop()
+		# --holdshop：停在商店不往下打，给网页截图看商店界面
+		if _args.has("holdshop"):
+			return
 		game.start_next_wave.call_deferred()
 
 
@@ -188,6 +197,7 @@ func on_game_over(game: Node) -> void:
 			int(game.time_alive), game.end_reason,
 		])
 		print("[bot] 各种僵尸击杀 ", _kind_kills)
+		print("[bot] 随身武器 %s，克制反馈 %s" % [game.player.loadout, game.cue_stats])
 		_print_perf()
 		get_tree().quit.call_deferred()
 
@@ -612,6 +622,92 @@ func _send_mouse(button: MouseButton) -> void:
 	Input.flush_buffered_events()
 
 
+## 商店情报：下一波的怪种和数量、Boss 和弱点都写出来，一行放不下就截断。
+func _shop_intel_checks(g: Variant) -> void:
+	var ui: Variant = g.shop_ui
+	var next: int = g.wave + 1
+	var preview: Dictionary = GameData.wave_preview(next)
+	var total := 0
+	for k: Dictionary in preview["kinds"]:
+		total += int(k["count"])
+	var queue_n := 0
+	for kind: String in GameData.build_spawn_queue(next):
+		if not GameData.is_boss(kind):
+			queue_n += 1
+	_check(total == queue_n, "情报的怪数和出怪队列一致（%d/%d）" % [total, queue_n])
+	_check(ui.intel_label.text.begins_with("情报：") and ui.intel_label.text.contains("×"), "商店写着下一波情报：%s" % ui.intel_label.text)
+	var widest := 0
+	var waves_ok := true
+	for w in range(2, GameData.MAX_WAVE + 1):
+		var pv: Dictionary = GameData.wave_preview(w)
+		if pv["kinds"].size() > GameData.PREVIEW_KINDS:
+			waves_ok = false
+		if GameData.boss_wave(w) != (String(pv["boss_kind"]) != ""):
+			waves_ok = false
+		ui._show_intel(pv)
+		widest = maxi(widest, int(Art.font.get_string_size(ui.intel_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x))
+		if GameData.boss_wave(w) and not (ui.weak_label.visible and ui.weak_label.text.contains("怕：" + GameData.weakness(String(pv["boss_kind"])))):
+			waves_ok = false
+	_check(waves_ok, "每波情报最多 %d 种怪，Boss 波写出 Boss 和怕什么" % GameData.PREVIEW_KINDS)
+	_check(widest <= int(ui.intel_label.size.x), "怪种情报一行放得下（最宽 %d / %d 像素）" % [widest, int(ui.intel_label.size.x)])
+	ui._show_intel(GameData.wave_preview(6))
+	_check(ui.weak_label.text.begins_with("Boss：覆甲巨像") and ui.weak_label.text.contains("霰弹"), "第 6 波情报写出覆甲巨像怕霰弹：%s" % ui.weak_label.text)
+	_check(ui.weak_label.text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS, "弱点情报太长时截断")
+	ui._show_intel(GameData.wave_preview(7))
+	_check(ui.weak_label.text.contains("护盾兵怕绕后"), "普通波也提醒精英的弱点：%s" % ui.weak_label.text)
+	var status_w: float = Art.font.get_string_size(ui.status_label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	_check(status_w <= ui.status_label.size.x and ui.status_label.text.contains("枪袋 3/4"), "状态栏写着枪袋 3/4 且放得下（%d / %d）" % [status_w, ui.status_label.size.x])
+	ui.refresh()
+
+
+## 随身枪袋：开局 3 把占 4 格，满了不能再解锁，卸下或扩容后才行；手枪卸不下，卸下的枪保留等级弹药但切不出来。
+func _shop_slot_checks(g: Variant) -> void:
+	var p: Variant = g.player
+	_check(p.loadout == ["pistol", "shotgun", "smg"] and p.weapon_slots == GameData.BASE_WEAPON_SLOTS, "开局带手枪、霰弹、冲锋，枪袋 %d 格" % p.weapon_slots)
+	_check(g.shop_buy("up_sniper") and p.carries("sniper") and p.loadout.size() == 4, "解锁狙击自动装进第 4 格")
+	_check(int(p.weapon_state["sniper"]["mag"]) == int(p.stats["sniper"]["mag"]), "sniper 解锁后弹匣是满的")
+	var row: Dictionary = {}
+	for it: Dictionary in g.shop_items():
+		if it["id"] == "up_flamer":
+			row = it
+	_check(bool(row["locked"]) and String(row["desc"]).contains("枪袋已满"), "枪袋满了，解锁按钮禁用并写明原因")
+	var coins0: int = g.coins
+	_check(not g.shop_buy("up_flamer") and not p.owns_weapon("flamer") and g.coins == coins0, "枪袋满了买不了第 5 把，也不扣钱")
+	var shotgun_level: int = p.weapon_state["shotgun"]["level"]
+	var shotgun_ammo: int = p.weapon_state["shotgun"]["reserve"]
+	_check(g.shop_buy("unequip_shotgun") and not p.carries("shotgun"), "卸下霰弹枪")
+	_check(p.owns_weapon("shotgun") and int(p.weapon_state["shotgun"]["level"]) == shotgun_level and int(p.weapon_state["shotgun"]["reserve"]) == shotgun_ammo, "卸下的枪保留等级和弹药")
+	p.switch_weapon("smg")
+	p.switch_weapon("shotgun")
+	_check(p.weapon_id == "smg", "卸下的枪切不出来")
+	var ammo_ids: Array[String] = []
+	for it: Dictionary in g.shop_items():
+		if it["tab"] == Shop.TAB_AMMO:
+			ammo_ids.append(String(it["id"]))
+	_check(not ammo_ids.has("ammo_shotgun") and not g.shop_buy("ammo_shotgun"), "没带的枪不卖弹药")
+	_check(g.shop_buy("up_shotgun") and int(p.weapon_state["shotgun"]["level"]) == shotgun_level + 1, "没带的枪照样能升级")
+	_check(g.shop_buy("up_flamer") and p.carries("flamer"), "卸下一把后能解锁新枪")
+	_check(int(p.weapon_state["flamer"]["mag"]) == int(p.stats["flamer"]["mag"]), "flamer 解锁后弹匣是满的")
+	_check(not g.shop_buy("equip_shotgun"), "枪袋满了装不回去")
+	_check(not g.shop_buy("unequip_pistol") and p.carries("pistol"), "手枪卸不下")
+	p.switch_weapon("smg")
+	_check(g.shop_buy("unequip_smg") and p.weapon_id == "pistol", "卸下手上的枪自动换回手枪")
+	_check(g.shop_buy("equip_smg"), "空出来的格子能装回去")
+	coins0 = g.coins
+	_check(g.shop_buy("slots") and p.weapon_slots == GameData.MAX_WEAPON_SLOTS and g.coins == coins0 - GameData.SLOT_COST, "扩容枪袋 %d 金币，枪袋变 %d 格" % [GameData.SLOT_COST, GameData.MAX_WEAPON_SLOTS])
+	_check(not g.shop_buy("slots"), "枪袋只能扩容一次")
+	_check(g.shop_buy("equip_shotgun") and p.loadout.size() == GameData.MAX_WEAPON_SLOTS, "扩容后再装一把（%d/%d）" % [p.loadout.size(), p.weapon_slots])
+	_check(not g.shop_buy("up_grenade"), "5 格满了也不能再解锁")
+	_check(p.loadout == ["pistol", "shotgun", "smg", "sniper", "flamer"], "枪袋按数字键顺序排（%s）" % [p.loadout])
+	g.shop_ui._select_tab(Shop.TAB_WEAPON)
+	await _sec(0.05)
+	_check(g.shop_ui._buttons.has("unequip_smg") and g.shop_ui._buttons.has("up_grenade") and g.shop_ui._buttons["up_grenade"].disabled, "武器页有卸下按钮，满了解锁按钮变灰")
+	await _shot("42_shop_loadout")
+	# 剩下的新枪逐把测解锁、补弹、升级：测试专用，放开枪袋上限
+	p.weapon_slots = GameData.WEAPON_ORDER.size()
+	g.shop_ui.refresh()
+
+
 func _flow_shop_run(g: Variant) -> void:
 	await _flow_shop_test(g)
 	_shop_done = true
@@ -632,6 +728,8 @@ func _flow_shop_test(g: Variant) -> void:
 	g.shop_ui._select_tab(Shop.TAB_WEAPON)
 	_check(g.shop_ui.rows.get_child_count() == GameData.WEAPON_ORDER.size(), "武器页列出全部 9 把枪")
 	_check(not g.shop_buy("ammo_sniper"), "未解锁的武器买不了弹药")
+	_shop_intel_checks(g)
+	await _shop_slot_checks(g)
 	await _sec(0.1)
 	var bar: VScrollBar = g.shop_ui.rows.get_parent().get_v_scroll_bar()
 	_check(bar.visible and bar.size.x >= 3.0 and bar.max_value > bar.page, "商品放不下时滚动条可见（宽 %d）" % bar.size.x)
@@ -646,7 +744,7 @@ func _flow_shop_test(g: Variant) -> void:
 	for item: Dictionary in g.shop_items():
 		ids.append(String(item["id"]))
 	for id: String in ids:
-		if id == "turret":
+		if id == "turret" or id == "slots":
 			continue
 		var coins_before: int = g.coins
 		var ok: bool = g.shop_buy(id)
@@ -654,7 +752,9 @@ func _flow_shop_test(g: Variant) -> void:
 	for id: String in NEW_WEAPONS:
 		_check(g.player.owns_weapon(id), "%s 解锁成功" % id)
 		var st: Dictionary = g.player.weapon_state[id]
-		_check(int(st["mag"]) == int(g.player.stats[id]["mag"]), "%s 解锁后弹匣是满的" % id)
+		# 狙击和火焰在枪袋用例里先解锁了，这里已经是升过一级的
+		if id != "sniper" and id != "flamer":
+			_check(int(st["mag"]) == int(g.player.stats[id]["mag"]), "%s 解锁后弹匣是满的" % id)
 		if GameData.WEAPONS[id].has("ammo_pack"):
 			var reserve_before: int = st["reserve"]
 			_check(g.shop_buy("ammo_" + id) and int(st["reserve"]) > reserve_before, "解锁后可买 %s 弹药" % id)
@@ -747,6 +847,17 @@ func _arena_spawn(g: Variant, kind: String, offset: Vector2) -> Node2D:
 	return z
 
 
+## 克制反馈飘字累计出现的次数。
+func _cues(g: Variant, text: String) -> int:
+	return int(g.cue_stats.get(text, 0))
+
+
+## 清掉飘字节流，下一下命中马上能出字。
+func _cue_ready(z: Variant) -> void:
+	z._cue_t = 0.0
+	z._cue_last_t = 0.0
+
+
 func _hurt(z: Variant) -> bool:
 	return not is_instance_valid(z) or z.dead or z.hp < z.max_hp
 
@@ -769,6 +880,10 @@ func _flow_arena(g: Variant) -> void:
 	g.god_mode = true
 	g.pickups.enabled = false
 	g.pickups.items.clear()
+	# 测试场地要轮流用九把枪：放开枪袋上限，全部装上
+	g.player.weapon_slots = GameData.WEAPON_ORDER.size()
+	for id: String in GameData.WEAPON_ORDER:
+		g.player.equip(id)
 	# 院内的炮塔会打测试僵尸，干扰伤害断言
 	for t: Variant in g.turrets:
 		t.set_physics_process(false)
@@ -978,6 +1093,11 @@ func _arena_cryo(g: Variant) -> void:
 	await _sec(0.3)
 	if z._frozen_t > 0.0:
 		_check(z.position.distance_to(pos) < 1.0, "冻住时站着不动")
+	var weak0 := _cues(g, "弱点！")
+	z.apply_chill(1.0)
+	_cue_ready(z)
+	z.take_damage(5.0, Vector2.RIGHT, 0.0, true, "bullet")
+	_check(z._frozen_t > 0.0 and _cues(g, "弱点！") == weak0 + 1, "打冻住的僵尸飘「弱点！」")
 	# 炮塔打冻住的僵尸有额外加成
 	await _arena_reset(g)
 	var plain: Node2D = _arena_spawn(g, "tank", Vector2(40, -30))
@@ -1258,6 +1378,16 @@ func _arena_keys(g: Variant) -> void:
 	var p: Variant = g.player
 	p.bot = null
 	await _sec(0.05)
+	p.switch_weapon("pistol")
+	p.unequip("sniper")
+	_send_key(KEY_4, true)
+	_send_key(KEY_4, false)
+	await _sec(0.05)
+	_check(p.weapon_id == "pistol", "按键 4 切不到没带的狙击枪")
+	_send_mouse(MOUSE_BUTTON_WHEEL_DOWN)
+	await _sec(0.05)
+	_check(p.weapon_id == "shotgun", "滚轮跳过没带的枪")
+	p.equip("sniper")
 	var keys: Array[Key] = [KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9]
 	for i in keys.size():
 		_send_key(keys[i], true)
@@ -1409,15 +1539,20 @@ func _arena_shielder(g: Variant) -> void:
 	var shield_before: float = brain.shield_hp
 	p.weapon_state["pistol"]["mag"] = 12
 	brain.face = Vector2.LEFT
+	var ding0 := _cues(g, "叮")
+	var weak0 := _cues(g, "弱点！")
 	await _hold_fire(g, "pistol", 0.03)
 	await _sec(0.15)
 	_check(z.hp == z.max_hp and brain.shield_hp < shield_before, "正面子弹被盾挡下，只磨耐久（%.0f -> %.0f）" % [shield_before, brain.shield_hp])
+	_check(_cues(g, "叮") == ding0 + 1 and _cues(g, "弱点！") == weak0, "子弹打在盾上飘「叮」")
 	# 绕后：盾朝反方向，同一把枪就能打到
 	brain.face = Vector2.RIGHT
 	p.cooldown = 0.0
+	_cue_ready(z)
 	await _hold_fire(g, "pistol", 0.03)
 	await _sec(0.15)
 	_check(z.hp < z.max_hp, "绕到背后能打穿")
+	_check(_cues(g, "弱点！") == weak0 + 1, "绕后打中护盾兵飘「弱点！」")
 	brain.face = Vector2.RIGHT
 	_check(not brain.blocks(z, Vector2.RIGHT) and brain.blocks(z, Vector2.LEFT), "盾只挡正面")
 	# 克制手段：爆炸、火焰、电弧、眩晕，都在盾朝向玩家时生效
@@ -1438,8 +1573,10 @@ func _arena_shielder(g: Variant) -> void:
 	var shock: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
 	await _sec(0.05)
 	shock._brain.face = Vector2.LEFT
+	var weak1 := _cues(g, "弱点！")
 	await _hold_fire(g, "arc", 0.03)
 	_check(shock.hp < shock.max_hp, "电弧无视盾牌")
+	_check(_cues(g, "弱点！") == weak1 + 1, "电弧打举盾的护盾兵飘「弱点！」")
 	await _arena_reset(g)
 	var stunned: Node2D = _arena_spawn(g, "shielder", Vector2(70, 0))
 	await _sec(0.05)
@@ -1825,15 +1962,27 @@ func _arena_colossus(g: Variant) -> void:
 		z.take_damage(float(c[1]), Vector2.RIGHT, 0.0, false, String(c[0]))
 		_check(absf(hp0 - z.hp - float(c[2])) < 0.05, "覆甲巨像吃 %s %.0f 点实际扣 %.1f（应为 %.1f）" % [c[0], c[1], hp0 - z.hp, c[2]])
 	_check(int(brain.stats.get("floor", 0)) >= 3, "覆甲巨像记下阈值减免次数（%d）" % int(brain.stats.get("floor", 0)))
-	# 真实开火：8 发冲锋枪子弹不如一枪霰弹
+	# 真实开火：8 发冲锋枪子弹不如一枪霰弹；冲锋枪飘灰色「叮」，霰弹和狙击飘橙色「弱点！」
 	var hp0: float = z.hp
+	_cue_ready(z)
+	var ding0 := _cues(g, "叮")
+	var weak0 := _cues(g, "弱点！")
 	for i in 8:
 		await _shoot_at(g, z, float(GameData.WEAPONS["smg"]["damage"]))
 	var smg_loss: float = hp0 - z.hp
+	var dings := _cues(g, "叮") - ding0
+	_check(dings >= 1 and dings <= 3 and _cues(g, "弱点！") == weak0, "冲锋枪打巨像飘「叮」且不刷屏（8 发 %d 个）" % dings)
 	hp0 = z.hp
+	_cue_ready(z)
 	await _buckshot(g, z)
 	var shot_loss: float = hp0 - z.hp
 	_check(smg_loss < 8.0 and shot_loss > smg_loss * 4.0, "冲锋枪打覆甲几乎没用（8 发 %.1f），霰弹一枪 %.1f" % [smg_loss, shot_loss])
+	_check(_cues(g, "弱点！") == weak0 + 1, "霰弹打巨像飘「弱点！」，一枪只飘一个")
+	_cue_ready(z)
+	var from: Vector2 = g.player.position + Vector2(0, -g.player.HAND_H)
+	g.ordnance.beam(from, from.direction_to(z.center()), 520.0, 95.0, 0.0, 4)
+	_check(_cues(g, "弱点！") == weak0 + 2, "狙击打巨像也飘「弱点！」")
+	await _shot("95_colossus_weak")
 	g.player.switch_weapon("pistol")
 	# 裂甲：护盾照常全额吃小伤害
 	z = await _boss_setup(g, "colossus", 1, Vector2(70, 0))
@@ -1843,11 +1992,15 @@ func _arena_colossus(g: Variant) -> void:
 	var shield0: float = brain.shield
 	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
 	_check(absf(shield0 - brain.shield - 10.0) < 0.05, "裂甲的护盾不打阈值折扣")
-	# 裸核：阈值取消
+	# 裸核：阈值取消，也就不再有「叮」和「弱点！」
 	z = await _boss_setup(g, "colossus", 2, Vector2(70, 0))
 	hp0 = z.hp
+	var cues0 := _cues(g, "叮") + _cues(g, "弱点！")
 	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
-	_check(absf(hp0 - z.hp - 10.0) < 0.05, "裸核阶段小伤害也算满（%.1f）" % (hp0 - z.hp))
+	_cue_ready(z)
+	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "buckshot")
+	_check(absf(hp0 - z.hp - 20.0) < 0.05, "裸核阶段小伤害也算满（%.1f）" % (hp0 - z.hp))
+	_check(_cues(g, "叮") + _cues(g, "弱点！") == cues0, "裸核阶段不飘叮和弱点")
 	await _shot("95_colossus")
 
 
@@ -1966,13 +2119,18 @@ func _arena_mirror(g: Variant) -> void:
 	brain.face = -dir
 	g.ordnance.beam(from, dir, 520.0, 95.0, 0.0, 4)
 	_check(z.hp == hp0 and p.hp < php0, "正面的狙击光束也被弹回来")
+	var weak0 := _cues(g, "弱点！")
 	brain.face = dir
+	_cue_ready(z)
 	await _shoot_at(g, z, 40.0)
 	_check(z.hp < hp0, "从背后打得动（%.0f）" % (hp0 - z.hp))
+	_check(_cues(g, "弱点！") == weak0 + 1, "从背后打镜面飘「弱点！」")
 	brain.face = -dir
 	hp0 = z.hp
+	_cue_ready(z)
 	g.ordnance.arc(from, dir, 150.0, 20.0, 0, 64.0, 0.0)
 	_check(z.hp < hp0, "电弧不看朝向")
+	_check(_cues(g, "弱点！") == weak0 + 2, "电弧打镜面飘「弱点！」")
 	hp0 = z.hp
 	g.explode(z.center(), 10.0, 30.0, true, true)
 	_check(z.hp < hp0, "爆炸不看朝向")

@@ -25,6 +25,9 @@ const MOVE_WARN := {
 const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "buckshot", "nuke", ""]
 ## 钻在地下时，这些直射打不到它（子弹从土堆上飞过去）。
 const DIRECT: Array[String] = ["bullet", "buckshot", "beam", "rang", "arc"]
+## 镜面的克制：这些不看朝向；直射从背后打进来也算。
+const MIRROR_WEAK: Array[String] = ["arc", "blast", "tick"]
+const MIRROR_BACK: Array[String] = ["bullet", "buckshot", "beam"]
 const BURROW_SPEED := 1.3
 const BURROW_REACH := 400.0
 ## 地下离玩家这么近就出土砸人。
@@ -181,7 +184,7 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 	if light:
 		amount *= float(spec.get("floor_mult", 0.1))
 		_count("floor")
-		_say(z, "装甲挡住了", Color("#c8d0dc"))
+		z.cue("叮", z.CUE_DING)
 		_note("floor", "%s 的装甲挡下小伤害（累计 %d 次，来源 %s）" % [spec["title"], int(stats["floor"]), src])
 	amount *= _guard
 	if phase + 1 < phases.size():
@@ -190,6 +193,17 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 			amount = maxf(z.hp - floor_hp, 0.0)
 			_begin_change(z)
 	return amount
+
+
+## 覆甲被霰弹、狙击、榴弹、回旋镖打出满额；镜面被电弧、爆炸、火焰或从背后打中。
+func weak_hit(_z: Variant, src: String, dir: Vector2) -> bool:
+	if _armored() and FLOOR_EXEMPT.has(src) and src != "":
+		_count("weak")
+		return true
+	if bool(spec.get("reflect", false)) and (MIRROR_WEAK.has(src) or (MIRROR_BACK.has(src) and dir.dot(face) >= MIRROR_FRONT)):
+		_count("weak")
+		return true
+	return false
 
 
 func _begin_change(z: Variant) -> void:

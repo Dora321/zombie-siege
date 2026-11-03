@@ -196,13 +196,18 @@ func _draw_money() -> void:
 
 func _draw_weapons() -> void:
 	var p: Variant = game.player
-	# 只显示已解锁的枪；当前武器的格子宽一些，放得下完整弹药数
+	# 只显示随身的枪，枪袋的空格画成暗框；当前武器的格子宽一些，放得下完整弹药数
 	var owned: Array[String] = p.owned_weapons()
 	var slot_w := 62
 	var mini_w := 32
-	var total := slot_w + (owned.size() - 1) * (mini_w + 2)
+	var empty := maxi(int(p.weapon_slots) - owned.size(), 0)
+	var total := slot_w + (owned.size() - 1 + empty) * (mini_w + 2)
 	var x := (W - total) / 2
 	var y0 := H - 24
+	for i in empty:
+		var hole := Rect2(x + total - (i + 1) * (mini_w + 2) + 2, y0, mini_w, 21)
+		draw_rect(hole, Color(0.09, 0.08, 0.11, 0.4))
+		draw_rect(hole, Color("#3a3840"), false, 1.0)
 	for id: String in owned:
 		var st: Dictionary = p.weapon_state[id]
 		var selected: bool = id == p.weapon_id

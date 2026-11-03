@@ -19,20 +19,32 @@ static func turret_cost(g: Node) -> int:
 static func items(g: Node) -> Array:
 	var p: Variant = g.player
 	var out: Array = []
-	# 武器
+	# 武器：解锁要枪袋有空位；已解锁的可以卸下或装备（swap 是行里的第二个按钮），没带的枪照样能升级
 	for id: String in GameData.WEAPON_ORDER:
 		var state: Dictionary = p.weapon_state[id]
 		var spec: Dictionary = GameData.WEAPONS[id]
 		var level: int = state["level"]
 		var maxed := level >= GameData.MAX_WEAPON_LEVEL
 		var key := GameData.WEAPON_ORDER.find(id) + 1
-		out.append({
+		var desc := String(spec["desc"]) if level == 0 else ("已满级" if maxed else String(spec["hint"]))
+		var bag_full: bool = level == 0 and p.loadout_full()
+		if bag_full:
+			desc = "枪袋已满，先卸下一把或扩容枪袋"
+		elif level > 0 and not p.carries(id):
+			desc = "没带在身上 · " + desc
+		var item := {
 			"id": "up_" + id, "tab": TAB_WEAPON,
 			"name": "[%d] 解锁%s" % [key, spec["name"]] if level == 0 else "[%d] %s Lv%d" % [key, spec["name"], level],
-			"desc": String(spec["desc"]) if level == 0 else ("已满级" if maxed else String(spec["hint"])),
+			"desc": desc,
 			"cost": 0 if maxed else GameData.upgrade_cost(id, level),
-			"locked": maxed,
-		})
+			"locked": maxed or bag_full,
+		}
+		if level > 0 and id != "pistol":
+			if p.carries(id):
+				item["swap"] = {"id": "unequip_" + id, "text": "卸下", "ok": p.can_unequip(id)}
+			else:
+				item["swap"] = {"id": "equip_" + id, "text": "装备", "ok": not p.loadout_full()}
+		out.append(item)
 	# 弹药：只列已解锁且需要备弹的枪
 	for id: String in p.owned_weapons():
 		var spec: Dictionary = GameData.WEAPONS[id]
@@ -99,6 +111,12 @@ static func items(g: Node) -> Array:
 		"desc": "已满级" if dash >= 3 else "冲刺冷却 -20%",
 		"cost": 0 if dash >= 3 else 70 * (dash + 1), "locked": dash >= 3,
 	})
+	var slots: int = p.weapon_slots
+	out.append({
+		"id": "slots", "tab": TAB_SUPPLY, "name": "扩容枪袋 %d/%d" % [slots, GameData.MAX_WEAPON_SLOTS],
+		"desc": "已扩容" if slots >= GameData.MAX_WEAPON_SLOTS else "随身多带一把枪",
+		"cost": 0 if slots >= GameData.MAX_WEAPON_SLOTS else GameData.SLOT_COST, "locked": slots >= GameData.MAX_WEAPON_SLOTS,
+	})
 	var magnet: int = g.purchases.get("magnet", 0)
 	out.append({
 		"id": "magnet", "tab": TAB_SUPPLY, "name": "磁铁 Lv%d" % magnet,
@@ -132,8 +150,12 @@ static func can_buy(g: Node, item: Dictionary) -> bool:
 	return g.coins >= int(item["cost"])
 
 
-## 购买：成功返回 true。放炮塔不在这里扣钱，落地时才扣。
+## 购买：成功返回 true。放炮塔不在这里扣钱，落地时才扣。装备和卸下不花钱。
 static func buy(g: Node, id: String) -> bool:
+	if id.begins_with("equip_"):
+		return g.player.equip(id.trim_prefix("equip_"))
+	if id.begins_with("unequip_"):
+		return g.player.unequip(id.trim_prefix("unequip_"))
 	var item: Dictionary = {}
 	for it: Dictionary in items(g):
 		if it["id"] == id:
@@ -183,6 +205,8 @@ static func buy(g: Node, id: String) -> bool:
 			"magnet":
 				g.purchases["magnet"] = int(g.purchases.get("magnet", 0)) + 1
 				p.magnet_range *= 1.4
+			"slots":
+				p.weapon_slots += 1
 			_:
 				return false
 	g.spend_coins(cost)

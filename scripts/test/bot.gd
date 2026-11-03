@@ -160,7 +160,7 @@ func go_to(p: Variant, dest: Vector2) -> Vector2:
 
 
 func _usable(p: Variant, id: String) -> bool:
-	if not p.owns_weapon(id):
+	if not p.carries(id):
 		return false
 	var st: Dictionary = p.weapon_state[id]
 	return int(st["mag"]) > 0 or int(st["reserve"]) > 0
@@ -258,7 +258,7 @@ func _manage_reload(p: Variant) -> void:
 ## 商店策略：先救急，再炮塔和升级，新武器和道具排在基础防御后面，剩余钱补弹药。
 func shop() -> void:
 	var priorities := ["repair", "heal", "base_repair", "ammo_smg", "turret", "up_smg", "up_arc", "up_pistol",
-		"item_frag", "up_flamer", "reinforce", "up_sniper", "item_medkit", "up_grenade", "up_cryo", "up_boomerang",
+		"item_frag", "slots", "up_flamer", "reinforce", "up_sniper", "item_medkit", "up_grenade", "up_cryo", "up_boomerang",
 		"item_armor", "up_shotgun", "turret_up", "max_hp", "item_flash", "item_sticky", "item_decoy", "ammo_shotgun",
 		"item_damage", "item_speed", "item_inf_ammo", "item_ammo_crate", "item_nuke", "boots", "dash", "magnet"]
 	# 已解锁武器的弹药少于一包才补，否则钱全砸在弹药上

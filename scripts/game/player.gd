@@ -22,6 +22,9 @@ var magnet_range := 42.0
 var weapon_id := "pistol"
 ## 每把枪的等级和弹药；level 为 0 表示还没解锁。
 var weapon_state := {}
+## 随身枪袋：只有装在里面的枪能切出来用、能补弹药。顺序同 WEAPON_ORDER，手枪永远在里面。
+var loadout: Array[String] = []
+var weapon_slots := GameData.BASE_WEAPON_SLOTS
 var stats := {}
 var cooldown := 0.0
 var reload_t := 0.0
@@ -84,6 +87,8 @@ func setup(g: Node, m: Node2D) -> void:
 		weapon_state[id] = {"level": start_level, "mag": 0, "reserve": spec["start_reserve"]}
 		_refresh_stats(id)
 		weapon_state[id]["mag"] = int(stats[id]["mag"])
+		if start_level > 0:
+			loadout.append(id)
 	for id: String in GameData.ITEM_ORDER:
 		items[id] = int(GameData.ITEMS[id]["start"])
 	_set_gun_sprite()
@@ -97,12 +102,47 @@ func owns_weapon(id: String) -> bool:
 	return int(weapon_state[id]["level"]) > 0
 
 
+## 随身带着的枪（HUD、切枪、补弹都只看这些）。
 func owned_weapons() -> Array[String]:
 	var out: Array[String] = []
-	for id: String in GameData.WEAPON_ORDER:
+	for id: String in loadout:
 		if owns_weapon(id):
 			out.append(id)
 	return out
+
+
+func carries(id: String) -> bool:
+	return loadout.has(id)
+
+
+func loadout_full() -> bool:
+	return loadout.size() >= weapon_slots
+
+
+## 把已解锁的枪装进枪袋。枪袋满了返回 false。
+func equip(id: String) -> bool:
+	if not owns_weapon(id) or carries(id) or loadout_full():
+		return false
+	loadout.append(id)
+	loadout.sort_custom(func(a, b): return GameData.WEAPON_ORDER.find(a) < GameData.WEAPON_ORDER.find(b))
+	return true
+
+
+func can_unequip(id: String) -> bool:
+	return carries(id) and id != "pistol" and loadout.size() > 1
+
+
+## 卸下的枪保留等级和弹药，只是切不出来。手里正拿着就换回手枪。
+func unequip(id: String) -> bool:
+	if not can_unequip(id):
+		return false
+	loadout.erase(id)
+	if weapon_id == id:
+		weapon_id = "pistol"
+		reload_t = 0.0
+		_set_gun_sprite()
+		queue_redraw()
+	return true
 
 
 func damage_mult() -> float:
@@ -132,6 +172,8 @@ func upgrade_weapon(id: String) -> void:
 	var old_mag := int(stats[id]["mag"])
 	st["level"] = int(st["level"]) + 1
 	_refresh_stats(id)
+	if unlocking:
+		equip(id)
 	# 升级后顺手填满新增的弹匣容量
 	if id == "pistol" or unlocking:
 		st["mag"] = int(stats[id]["mag"])
@@ -241,15 +283,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				break
 
 
-## 滚轮只在已解锁的枪之间切换。
+## 滚轮只在随身的枪之间切换。
 func _next_owned(step: int) -> int:
-	var order := GameData.WEAPON_ORDER
-	var i := order.find(weapon_id)
-	for k in order.size():
-		i = posmod(i + step, order.size())
-		if owns_weapon(order[i]):
-			return i
-	return order.find(weapon_id)
+	var carried := owned_weapons()
+	var i := carried.find(weapon_id)
+	if carried.is_empty():
+		return GameData.WEAPON_ORDER.find(weapon_id)
+	return GameData.WEAPON_ORDER.find(carried[posmod(i + step, carried.size())])
 
 
 func _tick_timers(dt: float) -> void:
@@ -332,10 +372,10 @@ func _animate(dt: float, _move_input: Vector2) -> void:
 func switch_weapon(id: String) -> void:
 	if id == weapon_id:
 		return
-	if not owns_weapon(id):
+	if not owns_weapon(id) or not carries(id):
 		if _no_ammo_note <= 0.0:
 			_no_ammo_note = 0.8
-			game.fx.text(position + Vector2(0, -22), "%s 未解锁" % GameData.WEAPONS[id]["name"], Color("#ff8060"))
+			game.fx.text(position + Vector2(0, -22), "%s %s" % [GameData.WEAPONS[id]["name"], "未解锁" if not owns_weapon(id) else "不在枪袋里"], Color("#ff8060"))
 			Sfx.play("deny")
 		return
 	weapon_id = id
