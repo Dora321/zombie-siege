@@ -91,6 +91,9 @@ var _burn_t := 0.0
 var _wet_t := 0.0
 var _shatter_t := -1.0
 var _quench_t := 0.0
+# 不灭契约：没挨打的倒计时和攒着没飘的回血量
+var _calm_t := 0.0
+var _regen_shown := 0.0
 var _dot_shown := 0.0
 var _ember_t := 0.0
 var _status_key := 0
@@ -111,10 +114,10 @@ func setup(g: Node, m: Node2D, zombie_kind: String, pos: Vector2, wave: int) -> 
 	kind = zombie_kind
 	position = pos
 	_stat = GameData.ZOMBIES[kind]
-	max_hp = float(_stat["hp"]) * GameData.hp_scale(wave)
+	max_hp = float(_stat["hp"]) * GameData.hp_scale(wave) * GameData.danger_hp_mult(g.danger)
 	hp = max_hp
 	_speed = float(_stat["speed"]) * randf_range(0.88, 1.12) * GameData.speed_scale(wave)
-	_damage = float(_stat["damage"]) * GameData.damage_scale(wave)
+	_damage = float(_stat["damage"]) * GameData.damage_scale(wave) * GameData.danger_damage_mult(g.danger)
 	_attack_cd = float(_stat["attack_cd"])
 	_knock_res = float(_stat["knock_res"])
 	_aggro = float(_stat["aggro"])
@@ -618,6 +621,7 @@ func take_tick(amount: float) -> void:
 	if dead:
 		return
 	var dealt := amount * vulnerability()
+	_calm_t = GameData.REGEN_DELAY
 	if _brain != null:
 		dealt = _brain.absorb(self, dealt, "tick")
 		# 火每帧都在烧，弱点字隔久一点
@@ -658,6 +662,8 @@ func _tick_status(dt: float) -> void:
 		take_tick(GameData.BURN_DPS * dt)
 		if dead:
 			return
+	if game.regen_on and not is_boss:
+		_tick_regen(dt)
 	var key := 0
 	if _frozen_t > 0.0:
 		key = 1
@@ -677,12 +683,26 @@ func _tick_status(dt: float) -> void:
 		queue_redraw()
 
 
+## 不灭契约：3 秒没挨打、身上没冰没火就慢慢回血，攒够才飘一次绿字。
+func _tick_regen(dt: float) -> void:
+	_calm_t -= dt
+	if _calm_t > 0.0 or hp >= max_hp or _burn_t > 0.0 or _chill_t > 0.0:
+		return
+	var heal := minf(max_hp * GameData.REGEN_RATE * dt, max_hp - hp)
+	hp += heal
+	_regen_shown += heal
+	if _regen_shown >= 10.0 or hp >= max_hp:
+		game.fx.number(center() + Vector2(randf_range(-3, 3), -6), roundi(_regen_shown), Color("#80ff70"))
+		_regen_shown = 0.0
+
+
 ## 子弹、爆炸都走这里。src 标明伤害来源（bullet/buckshot/beam/arc/rang/blast/nuke），
 ## Boss 的覆甲、钻地要看它；脚本直接扣血留空。
 func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "") -> void:
 	if dead:
 		return
 	var frozen := _frozen_t > 0.0
+	_calm_t = GameData.REGEN_DELAY
 	amount *= vulnerability()
 	var shatter := frozen and (src == "buckshot" or src == "beam")
 	if shatter:

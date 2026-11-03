@@ -149,6 +149,9 @@ func _draw_buffs(p: Variant) -> void:
 func _draw_wave_info() -> void:
 	var left: int = game.zombies.size() + game._queue.size()
 	Art.draw_text(self, "第 %d / %d 波" % [game.wave, GameData.MAX_WAVE], Vector2(W * 0.5, 2), 12, Color("#f0ece0"), 1)
+	# 危险等级和契约倍率，跟在波数后面
+	if game.score_mult > 1.0:
+		Art.draw_text(self, "危%d %s" % [game.danger, GameData.mult_text(game.score_mult)], Vector2(W * 0.5 + 38, 2), 12, Color("#ff9070"))
 	draw_texture(Art.skull_tex, Vector2(W * 0.5 - 18, 18))
 	Art.draw_tiny(self, str(left), Vector2(W * 0.5 - 7, 20), Color("#f0a090"))
 	if not game.boss_list.is_empty():

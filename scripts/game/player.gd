@@ -88,6 +88,9 @@ func setup(g: Node, m: Node2D) -> void:
 	for id: String in GameData.WEAPON_ORDER:
 		var spec: Dictionary = GameData.WEAPONS[id]
 		var start_level := 1 if int(spec["unlock_cost"]) == 0 else 0
+		# 禁冲锋枪契约：开局不给
+		if id == "smg" and g.has_contract("no_smg"):
+			start_level = 0
 		weapon_state[id] = {"level": start_level, "mag": 0, "reserve": spec["start_reserve"]}
 		_refresh_stats(id)
 		weapon_state[id]["mag"] = int(stats[id]["mag"])
@@ -95,6 +98,9 @@ func setup(g: Node, m: Node2D) -> void:
 			loadout.append(id)
 	for id: String in GameData.ITEM_ORDER:
 		items[id] = int(GameData.ITEMS[id]["start"])
+	if g.has_contract("glass"):
+		max_hp *= GameData.GLASS_HP
+		hp = max_hp
 	_set_gun_sprite()
 
 

@@ -8,6 +8,7 @@ const KINDS: Array[String] = ["walker", "walker", "runner", "walker", "spitter",
 @onready var bestiary_button: Button = %BestiaryButton
 @onready var bestiary_panel: Control = %BestiaryPanel
 @onready var map_panel: Control = %MapPanel
+@onready var prep_panel: Control = %PrepPanel
 @onready var clear_button: Button = %ClearButton
 @onready var quit_button: Button = %QuitButton
 @onready var help_panel: Control = %HelpPanel
@@ -39,7 +40,9 @@ func _ready() -> void:
 	bestiary_button.pressed.connect(_on_bestiary)
 	bestiary_panel.closed.connect(func(): start_button.grab_focus())
 	map_panel.closed.connect(func(): start_button.grab_focus())
-	map_panel.chosen.connect(start_game)
+	map_panel.chosen.connect(_on_map_chosen)
+	prep_panel.closed.connect(func(): map_panel.open())
+	prep_panel.confirmed.connect(func(): start_game(Save.map_id))
 	clear_button.pressed.connect(_on_clear)
 	quit_button.pressed.connect(func(): Sfx.quit_game())
 	help_close.pressed.connect(func():
@@ -85,13 +88,25 @@ func _refresh_scores() -> void:
 	var lines: Array[String] = ["排行榜"]
 	for i in Save.scores.size():
 		var s: Dictionary = Save.scores[i]
-		lines.append("%d. %d 分  第%d波%s" % [i + 1, int(s["score"]), int(s["wave"]), " 胜" if bool(s.get("victory", false)) else ""])
+		var line := "%d. %d 分  第%d波%s" % [i + 1, int(s["score"]), int(s["wave"]), " 胜" if bool(s.get("victory", false)) else ""]
+		# 旧存档没有危险和倍率，当危 0 ×1
+		var mult := float(s.get("mult", 1.0))
+		if int(s.get("danger", 0)) > 0 or mult > 1.0:
+			line += "  危%d %s" % [int(s.get("danger", 0)), GameData.mult_text(mult)]
+		lines.append(line)
 	scores_label.text = "\n".join(lines)
 
 
 func _on_start() -> void:
 	Sfx.play("ui_click")
 	map_panel.open()
+
+
+## 选完地图先进行动准备，确认后才开局。
+func _on_map_chosen(id: String) -> void:
+	Save.map_id = id
+	map_panel.visible = false
+	prep_panel.open(id)
 
 
 func start_game(id: String) -> void:

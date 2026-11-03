@@ -62,6 +62,13 @@ var result_rank := 0
 var cue_stats := {}
 ## 本局每种僵尸杀了几只，进化条件要看。
 var kind_kills := {}
+## 危险等级和契约：开局从存档读，整局不变。结算分 = 原分 × score_mult，raw_score 留着给结算界面看。
+var danger := 0
+var contracts: Array[String] = []
+var score_mult := 1.0
+var raw_score := 0
+## 不灭契约，僵尸每帧都要看，缓存一下。
+var regen_on := false
 
 var player: Node2D
 var base: Node2D
@@ -102,6 +109,10 @@ func _ready() -> void:
 	_buckets.resize(BUCKET_W * BUCKET_H)
 	for i in _buckets.size():
 		_buckets[i] = []
+	danger = Save.danger
+	contracts = Save.contracts.duplicate()
+	score_mult = GameData.run_mult(danger, contracts)
+	regen_on = has_contract("regen")
 	_map_spec = GameData.MAPS[Save.map_id]
 	_map_tint = Color(String(_map_spec["tint"]))
 	coins = int(_map_spec["coins"])
@@ -551,7 +562,7 @@ func credit_kill(z: Variant, drops: bool) -> void:
 	if not drops:
 		pickups.drop(z.position, "coin", int(stat["coins"]))
 		return
-	var total: int = ceili(float(stat["coins"]) * events.coin_mult)
+	var total: int = ceili(float(stat["coins"]) * events.coin_mult * GameData.danger_coin_mult(danger))
 	# Boss 叫来的精英只给一半钱，否则站着刷怪比打 Boss 还赚
 	if z.master != null:
 		total = (total + 1) / 2
@@ -573,6 +584,10 @@ func credit_kill(z: Variant, drops: bool) -> void:
 		pickups.drop(z.position + Vector2(0, -4), "ammo", 1)
 	elif entry.get("kind") == "med":
 		pickups.drop(z.position + Vector2(0, -4), "med", 25)
+
+
+func has_contract(id: String) -> bool:
+	return contracts.has(id)
 
 
 func kills_of(kinds: Array) -> int:
@@ -657,7 +672,12 @@ func _finish_game(reason: String) -> void:
 	_stop_until_ms = 0
 	Sfx.play_music("")
 	Sfx.play("victory" if victory else "game_over")
-	result_rank = Save.submit(score, wave, kills, victory)
+	# 危险和契约的倍率在结算时一次乘上；通关解锁下一级危险
+	raw_score = score
+	score = floori(score * score_mult + 0.001)
+	if victory:
+		Save.unlock_danger(danger + 1)
+	result_rank = Save.submit(score, wave, kills, victory, danger, contracts, score_mult)
 	Harness.on_game_over(self)
 
 

@@ -7,7 +7,7 @@ extends Node
 ##   godot --path . --fixed-fps 60 -- --flowtest --flowshots=DIR    流程测试并给新武器道具截图
 ##   godot --headless --path . --fixed-fps 60 -- --maptest --seed=1 三张地图和全部随机事件的校验
 ## 机器人和截图模式可加 --map=parking|alley 选图，--event=night 等每波固定事件，--noevents 关事件，
-## --holdshop 让机器人买完东西停在商店（网页截图看商店用）
+## --holdshop 让机器人买完东西停在商店（网页截图看商店用），--danger=3 --contracts=no_smg,glass 带危险等级和契约开局
 
 const BotScript := preload("res://scripts/test/bot.gd")
 const Shop := preload("res://scripts/game/shop_catalog.gd")
@@ -37,6 +37,7 @@ var _coroutine_wait := 0.0
 var _arena_done := false
 var _test_bot: Variant = null
 var _kind_kills := {}
+var _danger_probe: Array = []
 
 
 func _ready() -> void:
@@ -53,6 +54,15 @@ func _ready() -> void:
 	start_wave = int(_args.get("wave", "1"))
 	if GameData.MAPS.has(String(_args.get("map", ""))):
 		Save.map_id = String(_args["map"])
+	# 默认危 0、无契约（测试存档每次都是新的）；命令行可以指定
+	if _args.has("danger"):
+		Save.danger = clampi(int(_args["danger"]), 0, GameData.MAX_DANGER)
+		Save.max_danger = maxi(Save.max_danger, Save.danger)
+	if _args.has("contracts"):
+		Save.contracts.clear()
+		for id: String in String(_args["contracts"]).split(",", false):
+			if GameData.CONTRACTS.has(id):
+				Save.contracts.append(id)
 	if _args.has("sheet"):
 		_dump_sheets.call_deferred(String(_args["sheet"]))
 	elif _args.has("fontcheck"):
@@ -132,6 +142,8 @@ func _start_from_title(title: Node) -> void:
 		title._on_start()
 		_check(title.map_panel.visible, "开始游戏先打开选图")
 		title.map_panel.choose(Save.map_id)
+		_prep_checks(title)
+		title.prep_panel.confirm()
 		return
 	title.start_game(Save.map_id)
 
@@ -142,7 +154,7 @@ func on_game_ready(game: Node) -> void:
 	game.events.enabled = not (_mode == "flow" or _mode == "map" or _args.has("noevents"))
 	game.events.forced = String(_args.get("event", ""))
 	if _mode == "bot":
-		print("[bot] 地图 %s，种子 %d" % [game.map.map_id, fixed_seed])
+		print("[bot] 地图 %s，种子 %d，危险 %d，契约 %s" % [game.map.map_id, fixed_seed, game.danger, game.contracts])
 	if _mode == "shots":
 		_run_shots_game()
 	if _mode == "bot" or _mode == "shots":
@@ -590,7 +602,147 @@ func _tick_flow(dt: float) -> void:
 			_flow_wait = 0.4
 		96:
 			_check(get_tree().current_scene != null and get_tree().current_scene.name == "Title", "返回标题")
+			_flow_step = 97
+			_flow_wait = 0.3
+		97:
+			_flow_danger_start(get_tree().current_scene)
+			_flow_step = 98
+			_flow_wait = 0.4
+		98:
+			if _game == null:
+				return
+			_flow_danger_game(_game)
+			_flow_step = 99
+			_flow_wait = 0.6
+		99:
+			_flow_danger_regen(_game)
+			_flow_step = 100
+			_flow_wait = 0.3
+		100:
+			_flow_danger_result(_game)
+			_flow_step = 101
+			_flow_wait = 2.2
+		101:
+			_check(_game.over_ui.visible and _game.over_ui.stats_label.text.contains(GameData.mult_text(_game.score_mult)), "结算写出原分和倍率：%s" % _game.over_ui.stats_label.text.get_slice("\n", 0))
+			_game.over_ui.title_button.pressed.emit()
+			_game = null
+			_flow_step = 102
+			_flow_wait = 0.4
+		102:
+			_flow_danger_board(get_tree().current_scene)
 			_finish_flow()
+
+
+## 行动准备面板：选图后弹出，危 1~5 先锁着，契约可叠加，倍率随勾选变化；默认危 0 无契约直接开局。
+func _prep_checks(title: Node) -> void:
+	var prep: Variant = title.prep_panel
+	_check(prep.visible and not title.map_panel.visible, "选完地图进入行动准备")
+	_check(Save.max_danger == 0 and prep.danger == 0 and prep.picked.is_empty(), "新存档默认危 0、无契约")
+	var locked := true
+	for d in range(1, GameData.MAX_DANGER + 1):
+		locked = locked and prep.danger_buttons[d].disabled
+	_check(locked, "危 1~5 没通关前锁着")
+	prep.set_danger(3)
+	_check(prep.danger == 0, "点锁着的危险等级没反应")
+	prep.toggle_contract("no_smg")
+	prep.toggle_contract("glass")
+	var want := GameData.run_mult(0, ["no_smg", "glass"])
+	_check(absf(prep.multiplier() - want) < 0.001 and prep.mult_line().ends_with(GameData.mult_text(want)), "契约叠加，倍率 %s" % prep.mult_line())
+	prep.toggle_contract("glass")
+	_check(prep.picked == ["no_smg"], "契约可以取消")
+	var widest := 0
+	for d in GameData.MAX_DANGER + 1:
+		widest = maxi(widest, int(Art.font.get_string_size(GameData.danger_desc(d), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x))
+	for id: String in GameData.CONTRACT_ORDER:
+		var line := "+%d%%  %s" % [roundi(float(GameData.CONTRACTS[id]["mult"]) * 100.0), GameData.CONTRACTS[id]["desc"]]
+		widest = maxi(widest, int(prep.DESC_X + Art.font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x))
+	_check(widest <= int(prep.size.x) - 14, "行动准备的说明一行放得下（最宽 %d / %d）" % [widest, int(prep.size.x) - 14])
+	prep.close()
+	_check(title.map_panel.visible and not prep.visible, "行动准备可以返回选图")
+	title.map_panel.choose(Save.map_id)
+	_check(prep.picked.is_empty() and prep.multiplier() == 1.0, "没确认的勾选不保留，重开是危 0 ×1")
+
+
+## 第二局：通关危 0 解锁了危 1，带危 1 和全部契约从标题走一遍。
+func _flow_danger_start(title: Node) -> void:
+	_check(Save.max_danger == 1, "通关危 0 解锁危 1（%d）" % Save.max_danger)
+	title._on_start()
+	title.map_panel.choose(Save.map_id)
+	var prep: Variant = title.prep_panel
+	_check(not prep.danger_buttons[1].disabled and prep.danger_buttons[2].disabled, "危 1 能选，危 2 还锁着")
+	prep.set_danger(1)
+	for id: String in GameData.CONTRACT_ORDER:
+		prep.toggle_contract(id)
+	var want := GameData.run_mult(1, GameData.CONTRACT_ORDER)
+	_check(absf(prep.multiplier() - want) < 0.001, "危 1 加全部契约倍率 %s" % GameData.mult_text(want))
+	prep.confirm()
+	_check(Save.danger == 1 and Save.contracts.size() == GameData.CONTRACT_ORDER.size(), "确认后危险和契约写进存档")
+
+
+func _flow_danger_game(g: Variant) -> void:
+	var p: Variant = g.player
+	_check(g.danger == 1 and g.contracts.size() == GameData.CONTRACT_ORDER.size(), "开局带上危 1 和契约")
+	_check(not p.owns_weapon("smg") and p.loadout == ["pistol", "shotgun"], "禁冲锋枪：开局只有手枪和霰弹（%s）" % [p.loadout])
+	var smg_row := _shop_row(g, "up_smg")
+	_check(bool(smg_row["locked"]) and String(smg_row["desc"]).contains("禁用") and not g.shop_buy("up_smg"), "禁冲锋枪：商店解锁不了")
+	_check(bool(_shop_row(g, "turret")["locked"]) and not g.shop_buy("turret") and g.state != g.State.PLACING, "禁炮塔：放不了炮塔")
+	_check(absf(p.max_hp - 100.0 * GameData.GLASS_HP) < 0.01 and absf(p.hp - p.max_hp) < 0.01, "玻璃大炮：生命上限 %d" % roundi(p.max_hp))
+	var cfg: Dictionary = GameData.WAVES[0]
+	var want := roundi(int(cfg["walker"]) * float(GameData.MAPS[Save.map_id]["count_scale"]) * GameData.SWARM_COUNT)
+	_check(GameData.spawn_count(cfg, "walker") == want, "尸潮契约：第 1 波普通僵尸 %d 只" % want)
+	_check(GameData.danger_extra_elites(1) == 0 and GameData.danger_extra_elites(2) == 1 and GameData.danger_extra_elites(5) == 2, "危 2 起精英加只数")
+	g._spawn_zombie("walker")
+	var z: Variant = g.zombies[g.zombies.size() - 1]
+	var hp_want: float = float(GameData.ZOMBIES["walker"]["hp"]) * GameData.hp_scale(g.wave) * GameData.danger_hp_mult(1)
+	_check(absf(z.max_hp - hp_want) < 0.01, "危 1 僵尸血量 ×%.1f（%.1f）" % [GameData.danger_hp_mult(1), z.max_hp])
+	# 不灭：没挨打又没冰火时回血，挂着冰不回
+	z.stun(5.0)
+	z.hp = z.max_hp * 0.5
+	z._calm_t = 0.0
+	g._spawn_zombie("walker")
+	var cold: Variant = g.zombies[g.zombies.size() - 1]
+	cold.stun(5.0)
+	cold.hp = cold.max_hp * 0.5
+	cold.apply_chill(0.1)
+	cold._calm_t = 0.0
+	_danger_probe = [z, cold]
+
+
+func _flow_danger_regen(g: Variant) -> void:
+	var z: Variant = _danger_probe[0]
+	var cold: Variant = _danger_probe[1]
+	_check(z.hp > z.max_hp * 0.5, "不灭契约：没挨打的僵尸回血（%.1f -> %.1f）" % [z.max_hp * 0.5, z.hp])
+	_check(absf(cold.hp - cold.max_hp * 0.5) < 0.01, "不灭契约：挂着冰不回血")
+	for zz: Variant in g.zombies.duplicate():
+		zz.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	# 通关：原分记成 10000，结算乘倍率
+	g.score = 10000
+	g.wave = GameData.MAX_WAVE
+	g._queue.clear()
+	g.state = g.State.COMBAT
+
+
+func _flow_danger_result(g: Variant) -> void:
+	# 原分是 10000 加上最后一波的清场奖励
+	var want := floori(g.raw_score * g.score_mult + 0.001)
+	_check(g.victory and g.raw_score >= 10000 and g.score == want, "胜利分带倍率：%d %s = %d" % [g.raw_score, GameData.mult_text(g.score_mult), g.score])
+	var entry: Dictionary = {}
+	for s: Dictionary in Save.scores:
+		if int(s["score"]) == want:
+			entry = s
+	_check(not entry.is_empty() and int(entry["danger"]) == 1 and absf(float(entry["mult"]) - g.score_mult) < 0.001 and (entry["contracts"] as Array).size() == GameData.CONTRACT_ORDER.size(), "进榜记录带危险、契约和倍率")
+	_check(Save.max_danger == 2, "通关危 1 解锁危 2")
+
+
+func _flow_danger_board(title: Node) -> void:
+	_check(title != null and title.name == "Title", "第二局结束返回标题")
+	var text: String = title.scores_label.text
+	_check(text.contains("危1 " + GameData.mult_text(GameData.run_mult(1, GameData.CONTRACT_ORDER))), "排行榜写着危险和倍率")
+	var widest := 0
+	for line: String in text.split("\n"):
+		widest = maxi(widest, int(Art.font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x))
+	var panel: Control = title.scores_label.get_parent()
+	_check(widest <= int(panel.size.x) - 4, "排行榜一行放得下（最宽 %d / %d）" % [widest, int(panel.size.x)])
 
 
 ## 用例是协程，中途报错就不会再往下走。等太久直接判失败退出，不要卡死。

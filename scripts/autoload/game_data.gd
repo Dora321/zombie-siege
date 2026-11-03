@@ -459,6 +459,24 @@ const MAPS := {
 	},
 }
 
+## 危险等级 0~5：0 是原版难度。每级僵尸血量 +10%、伤害 +6%、金币 +5%、分数倍率 +0.1；
+## 2 级起出现精英的波每种精英多 1 只，4 级起多 2 只。通关危险 N-1 才解锁 N（Save.max_danger）。
+const MAX_DANGER := 5
+## 契约：开局前可叠加勾选，每个加一点分数倍率。效果见 player.setup、shop_catalog、spawn_count 和 zombie。
+const CONTRACT_ORDER: Array[String] = ["no_smg", "no_turret", "glass", "swarm", "regen"]
+const CONTRACTS := {
+	"no_smg": {"name": "禁冲锋枪", "desc": "开局没有冲锋枪，商店也不卖", "mult": 0.3},
+	"no_turret": {"name": "禁炮塔", "desc": "不能放炮塔", "mult": 0.2},
+	"glass": {"name": "玻璃大炮", "desc": "最大生命 ×0.7", "mult": 0.25},
+	"swarm": {"name": "尸潮契约", "desc": "普通僵尸数量 ×1.2", "mult": 0.2},
+	"regen": {"name": "不灭", "desc": "僵尸 3 秒没挨打就回血，冰火压得住", "mult": 0.3},
+}
+const GLASS_HP := 0.7
+const SWARM_COUNT := 1.2
+## 不灭契约：普通僵尸多久没挨打开始回血、每秒回最大生命的比例。Boss 不回。
+const REGEN_DELAY := 3.0
+const REGEN_RATE := 0.04
+
 ## 随机事件。slot 为 weather 的持续整波、开打前预警；slot 为 incident 的是波中或波前的一次性事件。
 ## skip 列出不触发的波次：第 11 波「黑夜降临」不再叠夜战，第 12 波「断电之夜」不再叠电磁干扰。
 ## 第 8、12 波已有特殊天气，不叠 weather；Boss 波要看清红圈，只可能有补给空投。规则见 event_allowed。
@@ -610,11 +628,18 @@ func build_spawn_queue(wave: int) -> Array[String]:
 	return queue
 
 
-## 一波里某种杂兵出几只。当前地图的 count_scale 只缩放普通僵尸，精英是逐波设计好的。
+## 一波里某种杂兵出几只。当前地图的 count_scale 和尸潮契约只缩放普通僵尸；
+## 精英是逐波设计好的，只有高危险等级给已有的精英加只数。
 func spawn_count(cfg: Dictionary, kind: String) -> int:
 	var count := int(cfg.get(kind, 0))
-	if not bool(ZOMBIES[kind].get("elite", false)):
-		count = roundi(count * float(MAPS[Save.map_id]["count_scale"]))
+	if bool(ZOMBIES[kind].get("elite", false)):
+		if count > 0:
+			count += danger_extra_elites(Save.danger)
+	else:
+		var scale := float(MAPS[Save.map_id]["count_scale"])
+		if Save.contracts.has("swarm"):
+			scale *= SWARM_COUNT
+		count = roundi(count * scale)
 	return count
 
 
@@ -661,6 +686,56 @@ func short_name(kind: String) -> String:
 
 func weakness(kind: String) -> String:
 	return String(ZOMBIES[kind].get("weak", ""))
+
+
+func danger_hp_mult(d: int) -> float:
+	return 1.0 + 0.1 * d
+
+
+func danger_damage_mult(d: int) -> float:
+	return 1.0 + 0.06 * d
+
+
+func danger_coin_mult(d: int) -> float:
+	return 1.0 + 0.05 * d
+
+
+func danger_score_mult(d: int) -> float:
+	return 1.0 + 0.1 * d
+
+
+func danger_extra_elites(d: int) -> int:
+	return floori(d / 2.0)
+
+
+func contract_mult(list: Array) -> float:
+	var m := 1.0
+	for id: String in list:
+		m += float(CONTRACTS[id]["mult"])
+	return m
+
+
+## 结算分数的总倍率：危险倍率 × 契约倍率。
+func run_mult(d: int, list: Array) -> float:
+	return danger_score_mult(d) * contract_mult(list)
+
+
+## 倍率写成「×1.8」「×2.25」「×2」，去掉多余的 0。
+func mult_text(m: float) -> String:
+	return "×" + _short_num(m)
+
+
+func _short_num(x: float) -> String:
+	return ("%.2f" % x).rstrip("0").rstrip(".")
+
+
+func danger_desc(d: int) -> String:
+	if d <= 0:
+		return "危 0：原版难度"
+	var line := "危 %d：僵尸血量 ×%s 伤害 ×%s 金币 ×%s" % [d, _short_num(danger_hp_mult(d)), _short_num(danger_damage_mult(d)), _short_num(danger_coin_mult(d))]
+	if danger_extra_elites(d) > 0:
+		line += " 精英各 +%d" % danger_extra_elites(d)
+	return line
 
 
 func is_boss(kind: String) -> bool:

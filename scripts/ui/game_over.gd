@@ -29,8 +29,15 @@ func open() -> void:
 	var accuracy := 0 if fired == 0 else roundi(float(game.bullets.shots_hit) / fired * 100.0)
 	var minutes := int(game.time_alive) / 60
 	var seconds := int(game.time_alive) % 60
-	stats_label.text = "最终分数  %d\n地图 %s  坚持波次  %d / %d\n击杀僵尸  %d    最高连杀  %d\n命中率  %d%%    战斗时长  %d:%02d\n累计金币  %d" % [
-		game.score, GameData.MAPS[game.map.map_id]["name"], game.wave, GameData.MAX_WAVE, game.kills, game.best_combo,
+	# 有危险等级或契约时写出原分和倍率
+	var score_txt := str(game.score)
+	if game.score_mult > 1.0:
+		score_txt += "（%d %s）" % [game.raw_score, GameData.mult_text(game.score_mult)]
+	var map_txt := String(GameData.MAPS[game.map.map_id]["name"])
+	if game.danger > 0:
+		map_txt += " 危%d" % game.danger
+	stats_label.text = "最终分数  %s\n地图 %s  坚持波次  %d / %d\n击杀僵尸  %d    最高连杀  %d\n命中率  %d%%    战斗时长  %d:%02d\n累计金币  %d" % [
+		score_txt, map_txt, game.wave, GameData.MAX_WAVE, game.kills, game.best_combo,
 		accuracy, minutes, seconds, game.coins_earned,
 	]
 	if game.result_rank == 1:

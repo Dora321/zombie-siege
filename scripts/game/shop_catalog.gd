@@ -26,7 +26,8 @@ static func items(g: Node) -> Array:
 		var level: int = state["level"]
 		var maxed := level >= GameData.MAX_WEAPON_LEVEL
 		var key := GameData.WEAPON_ORDER.find(id) + 1
-		var desc := String(spec["desc"]) if level == 0 else ("已满级" if maxed else String(spec["hint"]))
+		# 自带的三把枪没有 desc（只有禁冲锋枪契约下冲锋枪才会是 0 级）
+		var desc := String(spec.get("desc", spec["hint"])) if level == 0 else ("已满级" if maxed else String(spec["hint"]))
 		var bag_full: bool = level == 0 and p.loadout_full()
 		if bag_full:
 			desc = "枪袋已满，先卸下一把或扩容枪袋"
@@ -58,7 +59,12 @@ static func items(g: Node) -> Array:
 					item["desc"] = "进化%s%s" % [spec_evo["name"], check["reason"]]
 			if not p.carries(id):
 				item["desc"] = "没带在身上 · " + String(item["desc"])
-		if level > 0 and id != "pistol":
+		# 禁冲锋枪契约：冲锋枪这一行整行禁用
+		if id == "smg" and g.has_contract("no_smg"):
+			item["locked"] = true
+			item["desc"] = "契约：本局禁用冲锋枪"
+			item["locked_text"] = "禁用"
+		elif level > 0 and id != "pistol":
 			if p.carries(id):
 				item["swap"] = {"id": "unequip_" + id, "text": "卸下", "ok": p.can_unequip(id)}
 			else:
@@ -95,17 +101,25 @@ static func items(g: Node) -> Array:
 		"cost": 75, "locked": base_missing < 1.0,
 	})
 	var maxed_turrets: bool = g.turrets.size() >= MAX_TURRETS
-	out.append({
+	var turret := {
 		"id": "turret", "tab": TAB_DEFENSE, "name": "放置炮塔 %d/%d" % [g.turrets.size(), MAX_TURRETS],
 		"desc": "已达上限" if maxed_turrets else "点地面放置",
 		"cost": 0 if maxed_turrets else turret_cost(g), "locked": maxed_turrets,
-	})
+	}
 	var tlvl: int = g.turret_level
-	out.append({
+	var turret_up := {
 		"id": "turret_up", "tab": TAB_DEFENSE, "name": "升级炮塔 Lv%d" % tlvl,
 		"desc": "已满级" if tlvl >= MAX_TURRET_LEVEL else "伤害射速射程提升",
 		"cost": 0 if tlvl >= MAX_TURRET_LEVEL else 140 * tlvl, "locked": tlvl >= MAX_TURRET_LEVEL,
-	})
+	}
+	# 禁炮塔契约：放置和升级都禁用
+	if g.has_contract("no_turret"):
+		for it: Dictionary in [turret, turret_up]:
+			it["locked"] = true
+			it["desc"] = "契约：本局不能放炮塔"
+			it["locked_text"] = "禁用"
+	out.append(turret)
+	out.append(turret_up)
 	# 补给
 	out.append({
 		"id": "heal", "tab": TAB_SUPPLY, "name": "急救包 +50",
