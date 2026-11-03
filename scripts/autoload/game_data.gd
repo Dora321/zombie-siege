@@ -217,8 +217,14 @@ const ZOMBIES := {
 		"blood": "#8c1c1c", "flying": true, "elite": true,
 		"desc": "飘过围墙，在头顶投下毒弹", "tip": "打爆气球会摔下一只半血僵尸",
 	},
+	"vanguard": {
+		"name": "裂颚先锋", "hp": 420.0, "speed": 26.0, "damage": 22.0, "attack_cd": 1.2,
+		"coins": 60, "score": 250, "hit_r": 10.0, "center": 11.0, "knock_res": 0.9, "aggro": 140.0,
+		"blood": "#7a1818", "is_boss": true,
+		"desc": "屠夫的小号，会冲撞和重砸", "tip": "不用换枪，先学会躲开再还手",
+	},
 	"boss": {
-		"name": "屠夫", "hp": 1050.0, "speed": 22.0, "damage": 33.0, "attack_cd": 1.3,
+		"name": "屠夫", "hp": 900.0, "speed": 22.0, "damage": 33.0, "attack_cd": 1.3,
 		"coins": 140, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
 		"blood": "#6e1414", "is_boss": true,
 	},
@@ -235,20 +241,30 @@ const ZOMBIES := {
 }
 
 ## Boss 的阶段表。at 是进入该阶段的血量比例，moves 是招式池，enter 是一进阶段就放的招。
-## 招式实现见 boss_brain.gd。
+## 招式实现见 boss_brain.gd。trophy 可以没有（小 Boss 只掉道具）。
+## break 是连冲 charge2 蓄力时能吃的霰弹击退总量（不打 knock_res 的折扣），攒够就被打断并硬直。
 const BOSSES := {
+	"vanguard": {
+		"title": "裂颚先锋", "warn": "红色通道是冲撞路线，红圈是重砸，侧向闪开", "drops": ["armor", "ammo_crate"], "slam_scale": 0.9,
+		"phases": [
+			{"at": 1.0, "name": "裂颚", "sub": "", "speed": 1.0, "gap": [2.4, 3.2], "moves": ["charge", "slam"]},
+			{"at": 0.45, "name": "狂奔", "sub": "跑得更快，冲完还会再冲一次", "speed": 1.3, "gap": [1.6, 2.3], "rocks": 2, "tint": "#ffc0a0",
+				"enter": "charge", "moves": ["charge2", "rocks"]},
+		],
+	},
 	"boss": {
 		"title": "屠夫", "warn": "看到红色通道就侧向闪开", "trophy": "heart", "drops": ["armor", "ammo_crate", "damage"],
 		"phases": [
 			{"at": 1.0, "name": "屠刀", "sub": "", "speed": 1.0, "gap": [2.2, 3.1], "rocks": 3, "moves": ["charge", "slam", "rocks"]},
-			{"at": 0.5, "name": "狂怒", "sub": "连环冲撞，还叫来了帮手", "speed": 1.35, "gap": [1.4, 2.1], "rocks": 5, "tint": "#ffa8a0",
-				"enter": "call", "call": ["runner", "runner", "exploder"], "moves": ["charge2", "slam", "rocks", "call"]},
+			{"at": 0.5, "name": "狂怒", "sub": "连冲蓄力时，用闪光弹或霰弹枪贴脸打断它", "speed": 1.35, "gap": [1.4, 2.1], "rocks": 5, "tint": "#ffa8a0",
+				"enter": "call", "call": ["runner", "runner", "exploder"], "break": 300.0, "moves": ["charge2", "slam", "rocks", "call"]},
 		],
 	},
 	"plague": {
 		"title": "瘟疫母体", "warn": "毒雾会缓慢掉血，离开绿圈", "trophy": "serum", "drops": ["medkit", "inf_ammo", "armor"], "shield": 0.16,
 		"phases": [
-			{"at": 1.0, "name": "孢子", "sub": "", "speed": 1.0, "gap": [2.0, 3.0], "call": ["splitling", "splitling", "spitter"], "moves": ["fog", "fan", "call"]},
+			# 第 8 波和酸雨同场，第一阶段不放毒雾，免得地上的圈分不清
+			{"at": 1.0, "name": "孢子", "sub": "", "speed": 1.0, "gap": [2.0, 3.0], "rocks": 2, "call": ["splitling", "splitling", "spitter"], "moves": ["fan", "call", "rocks"]},
 			{"at": 0.55, "name": "脓盾", "sub": "先打破绿色护盾，再打本体", "speed": 0.9, "gap": [1.6, 2.4], "tint": "#d8ffa0",
 				"enter": "shield", "call": ["splitter", "spitter", "screamer"], "moves": ["fogring", "fog", "fan", "shield", "call"]},
 		],
@@ -272,6 +288,8 @@ const BOSSES := {
 const ACID_RAIN_GAP := 2.8
 const ACID_RAIN_COUNT := 4
 const ACID_RAIN_DAMAGE := 12.0
+## Boss 在场时酸雨变稀：间隔乘这个倍数，每轮少落一滴。
+const ACID_RAIN_BOSS_GAP := 1.5
 
 ## 三张地图。布局见 map_layouts.gd（废墟街区在 world_map.gd 里程序生成）。
 ## coins 开局金币，base_scale 基地受伤系数，group 一批僵尸从同一方向来的数量（越小越容易被包抄），
@@ -350,22 +368,23 @@ const EMP_OVERCLOCK_RATE := 0.6
 const VANGUARD_COUNT := 6
 const VANGUARD_EXTRA_TIME := 3.0
 
-## 手工设计的 15 波节奏：新敌人逐波登场，第 5、10、15 波是 Boss 阶段战，第 8、12 波是特殊波。
+## 手工设计的 15 波节奏：偶数波打 Boss，奇数波是普通波，第 15 波尸王终局；第 8、12 波是特殊波。
+## 一期只有裂颚先锋（2）、屠夫（4）、瘟疫母体（8）和尸王（15），6、10、12、14 波先用高压普通波占位。
 const WAVES := [
 	{"name": "先头部队", "walker": 10},
-	{"name": "脚步渐近", "walker": 13, "runner": 4},
-	{"name": "毒液来袭", "walker": 14, "runner": 5, "spitter": 3},
+	{"name": "裂颚先锋", "walker": 6, "runner": 2, "vanguard": 1, "hint": "红色通道是冲撞路线，红圈是重砸，看到就侧向闪开"},
+	{"name": "毒液来袭", "walker": 12, "runner": 4, "spitter": 3},
+	{"name": "屠夫现身", "walker": 6, "runner": 4, "exploder": 1, "boss": 1},
 	{"name": "会爆炸的家伙", "walker": 13, "runner": 5, "spitter": 2, "exploder": 4, "splitter": 2},
-	{"name": "屠夫现身", "walker": 8, "runner": 5, "exploder": 2, "boss": 1},
-	{"name": "暗处的眼睛", "walker": 10, "runner": 16, "exploder": 2, "stalker": 4},
+	{"name": "暗处的眼睛", "walker": 10, "runner": 16, "exploder": 2, "stalker": 4},  # TODO(Phase2)：换成覆甲巨像
 	{"name": "铁壁", "walker": 14, "runner": 7, "spitter": 3, "tank": 2, "shielder": 3},
-	{"name": "酸雨", "walker": 16, "runner": 8, "spitter": 7, "exploder": 3, "tank": 1, "splitter": 3, "special": "acid_rain", "hint": "天上在下酸雨，看到地上的红圈就走开"},
+	{"name": "瘟疫酸雨", "walker": 12, "runner": 6, "spitter": 4, "exploder": 2, "splitter": 3, "plague": 1, "special": "acid_rain", "hint": "酸雨里瘟疫母体来了：红圈落酸液，绿圈是毒雾"},
 	{"name": "火药桶", "walker": 14, "runner": 10, "exploder": 10, "tank": 2, "summoner": 2},
-	{"name": "瘟疫母体", "walker": 16, "runner": 8, "spitter": 3, "exploder": 3, "tank": 1, "splitter": 2, "screamer": 2, "plague": 1},
+	{"name": "坟场躁动", "walker": 20, "runner": 12, "spitter": 4, "exploder": 4, "tank": 2, "splitter": 3, "screamer": 2},  # TODO(Phase2)：换成再生坟主
 	{"name": "黑夜降临", "walker": 28, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "screamer": 3, "balloon": 2},
-	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 10, "special": "blackout", "hint": "全城断电，潜伏者最爱这种夜晚"},
-	{"name": "尸潮", "walker": 42, "runner": 26, "spitter": 7, "exploder": 8, "tank": 4, "splitter": 5, "balloon": 4, "screamer": 2},
-	{"name": "绝望之墙", "walker": 24, "runner": 18, "spitter": 8, "exploder": 8, "tank": 6, "shielder": 8, "summoner": 3, "screamer": 3, "balloon": 3},
+	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 10, "special": "blackout", "hint": "全城断电，潜伏者最爱这种夜晚"},  # TODO(Phase3)：加掘地领主
+	{"name": "尸潮", "walker": 38, "runner": 23, "spitter": 6, "exploder": 7, "tank": 4, "splitter": 4, "balloon": 4, "screamer": 2},
+	{"name": "绝望之墙", "walker": 24, "runner": 18, "spitter": 8, "exploder": 8, "tank": 6, "shielder": 8, "summoner": 3, "screamer": 3, "balloon": 3},  # TODO(Phase3)：换成镜面女皇
 	{"name": "最终围城", "walker": 22, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "shielder": 3, "stalker": 3, "overlord": 1},
 ]
 

@@ -27,6 +27,11 @@ func on_stun(_z: Variant) -> void:
 	pass
 
 
+## 被霰弹弹丸打中，knock 是没打 knock_res 折扣的原始击退。
+func on_buckshot(_z: Variant, _knock: float) -> void:
+	pass
+
+
 func on_die(_z: Variant) -> void:
 	pass
 

@@ -5,7 +5,8 @@ const PAGES: Array = [
 	{"title": "普通僵尸", "kinds": ["walker", "runner", "tank", "exploder", "spitter"]},
 	{"title": "精英僵尸（一）", "kinds": ["stalker", "shielder", "splitter", "splitling"]},
 	{"title": "精英僵尸（二）", "kinds": ["summoner", "imp", "screamer", "balloon"]},
-	{"title": "Boss", "kinds": ["boss", "plague", "overlord"]},
+	{"title": "Boss（一）", "kinds": ["vanguard", "boss"]},
+	{"title": "Boss（二）", "kinds": ["plague", "overlord"]},
 ]
 const ROW_H := 50
 const TOP := 26
@@ -85,7 +86,10 @@ func _draw_row(kind: String, y: int, row: int) -> void:
 			lines += ("  " if i > 0 else "") + "%d.%s" % [i + 1, phases[i]["name"]]
 		Art.draw_text(self, "第 %d 波 · %d 阶段：%s" % [_boss_wave(kind), phases.size(), lines], Vector2(TEXT_X, y + 13), 12, Color("#e8e4d8"))
 		Art.draw_text(self, String(boss["warn"]), Vector2(TEXT_X, y + 26), 12, Color("#a8d8a0"))
-		Art.draw_text(self, "战利品：%s（%s）" % [GameData.TROPHIES[boss["trophy"]]["name"], GameData.TROPHIES[boss["trophy"]]["desc"]], Vector2(TEXT_X, y + 39), 12, Color("#ffe080"))
+		if boss.has("trophy"):
+			Art.draw_text(self, "战利品：%s（%s）" % [GameData.TROPHIES[boss["trophy"]]["name"], GameData.TROPHIES[boss["trophy"]]["desc"]], Vector2(TEXT_X, y + 39), 12, Color("#ffe080"))
+		else:
+			Art.draw_text(self, "对策：" + String(stat["tip"]), Vector2(TEXT_X, y + 39), 12, Color("#ffe080"))
 		return
 	Art.draw_text(self, String(stat["desc"]), Vector2(TEXT_X, y + 13), 12, Color("#e8e4d8"))
 	Art.draw_text(self, "对策：" + String(stat["tip"]), Vector2(TEXT_X, y + 26), 12, Color("#a8d8a0"))

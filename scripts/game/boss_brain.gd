@@ -13,6 +13,8 @@ const FAN_REACH := 170.0
 const WAVE_REACH := 150.0
 const FAR := 260.0
 const MINION_CAP := 6
+## 连冲被闪光或霰弹打断后的硬直。
+const BREAK_STUN := 0.8
 const MOVE_WARN := {
 	"charge": CHARGE_WARN, "charge2": CHARGE_WARN, "slam": 0.9, "rocks": 0.55, "storm": 0.7, "fog": 0.6,
 	"fogring": 0.7, "fan": 0.6, "wave": 0.9, "call": 0.8, "elites": 1.0, "shield": 0.7, "scream": 0.9,
@@ -33,6 +35,10 @@ var _last := ""
 var _chain := 0
 var _enter := ""
 var _guard := 1.0
+# 阶段配了 break 时，连冲的蓄力能被打断；_brace 是这次蓄力已经吃到的霰弹击退
+var _breakable := false
+var _brace := 0.0
+var _lane: Variant = null
 
 
 func setup(z: Variant) -> void:
@@ -91,6 +97,8 @@ func _begin_change(z: Variant) -> void:
 	changing_t = CHANGE_T
 	_act = ""
 	_chain = 0
+	_breakable = false
+	_drop_lane(z)
 	z._charge_t = 0.0
 	z._pose = -1
 	shield = 0.0
@@ -101,9 +109,37 @@ func _begin_change(z: Variant) -> void:
 
 func on_stun(z: Variant) -> void:
 	# 被晕打断蓄力，闪光弹是正经的反制手段
+	if _breakable and _act != "":
+		_interrupt(z, "闪光")
 	_act = ""
 	_chain = 0
 	z._pose = -1
+	_drop_lane(z)
+
+
+## 霰弹的击退 Boss 几乎不吃，但连冲蓄力时按原始击退累计，攒够就打断。
+func on_buckshot(z: Variant, knock: float) -> void:
+	if not _breakable or _act == "":
+		return
+	_brace += knock
+	if _brace >= float(phases[phase]["break"]):
+		_interrupt(z, "霰弹")
+		z.stun(BREAK_STUN)
+
+
+func _interrupt(z: Variant, by: String) -> void:
+	_breakable = false
+	z._stun_t = maxf(z._stun_t, BREAK_STUN)
+	z.game.fx.text(z.position + Vector2(0, -z.center_h * 2.0 - 8.0), "打断！", Color("#ffe060"))
+	Sfx.play("shield_break", 0.0)
+	Harness.note("%s 的连冲被%s打断（第 %d 阶段）" % [spec["title"], by, phase + 1])
+
+
+## 蓄力被取消时，地上的冲撞通道也一起撤掉。
+func _drop_lane(z: Variant) -> void:
+	if _lane != null:
+		z.game.hazards.lanes.erase(_lane)
+		_lane = null
 
 
 func on_die(z: Variant) -> void:
@@ -127,7 +163,7 @@ func decide(z: Variant, dt: float, player_ok: bool) -> Variant:
 			z._end_charge()
 			if _chain > 0:
 				_chain -= 1
-				_begin_move(z, "charge")
+				_begin_move(z, "charge", true)
 			return Vector2.ZERO
 		return z._charge_dir
 	if _act != "":
@@ -205,12 +241,15 @@ func _can_use(z: Variant, move: String, d: float) -> bool:
 
 
 ## 蓄力开始：亮红圈和闪光，招式的落点此时就定了，玩家有时间躲。
-func _begin_move(z: Variant, move: String) -> void:
+## follow 表示这是连冲的第二段蓄力。
+func _begin_move(z: Variant, move: String, follow := false) -> void:
 	var warn: float = MOVE_WARN[move]
 	_act = move
 	_act_t = warn
 	_last = move
 	moves_used[move] = true
+	_breakable = phases[phase].has("break") and (move == "charge2" or follow)
+	_brace = 0.0
 	z.flash_warn(warn)
 	z._pose = 2
 	var hazards: Variant = z.game.hazards
@@ -220,7 +259,7 @@ func _begin_move(z: Variant, move: String) -> void:
 				_chain = 1
 			var player: Variant = z.game.player
 			z._charge_dir = z.position.direction_to(player.position if player.alive else z.game.base.position)
-			hazards.lane(z.position, z._charge_dir, z.charge_speed() * CHARGE_T, 16.0, warn)
+			_lane = hazards.lane(z.position, z._charge_dir, z.charge_speed() * CHARGE_T, 16.0, warn)
 			Sfx.play("charge_warn", 0.0)
 		"slam":
 			hazards.slam(z.position, SLAM_R * float(spec.get("slam_scale", 1.0)), z._damage * 1.2, warn, z)

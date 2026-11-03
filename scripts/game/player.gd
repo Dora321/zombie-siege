@@ -429,6 +429,7 @@ func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 				var bullet_speed := float(s["speed"]) * randf_range(0.92, 1.05)
 				var b: Variant = game.bullets.fire(muzzle, d * bullet_speed, damage, float(s["knock"]), float(s["life"]), int(s["pierce"]), Color(String(s["color"])), true)
 				b.chill = float(s.get("chill", 0.0))
+				b.buckshot = int(s["pellets"]) > 1
 
 
 ## 回旋镖飞回手里。

@@ -82,6 +82,11 @@ const CHARS := {
 		"w": 20, "h": 36, "zombie": true, "style": "balloon", "paint": true,
 		"skin": "#86a862", "hair": "#3a3226", "shirt": "#6c8a5a", "pants": "#4d4034", "eye": "#e83a2a",
 	},
+	"vanguard": {
+		"w": 26, "h": 25, "hw": 8, "hh": 7, "tw": 12, "th": 8, "lh": 5, "zombie": true, "style": "vanguard",
+		"skin": "#b07c6c", "hair": "#3a1c1c", "shirt": "#8a3c34", "pants": "#2c2228",
+		"shoe": "#181418", "eye": "#ffe040", "arm_w": 2, "arm_len": 6, "lean": 1, "pads": true,
+	},
 	"plague": {
 		"w": 42, "h": 38, "hw": 8, "hh": 6, "tw": 26, "th": 20, "lh": 4, "zombie": true, "style": "plague",
 		"skin": "#7a9a50", "hair": "#3c5028", "shirt": "#5e7a38", "pants": "#2c3820",
@@ -221,7 +226,7 @@ func char_image(kind: String, dir: int, index: int) -> Image:
 
 ## 把图集里的图片合成一张预览图，供开发时肉眼检查。
 func debug_sheet() -> Image:
-	var sheet := Image.create_empty(640, 480, false, Image.FORMAT_RGBA8)
+	var sheet := Image.create_empty(640, 512, false, Image.FORMAT_RGBA8)
 	sheet.fill(Color(0.3, 0.42, 0.26))
 	var y := 2
 	for kind in CHARS.keys():

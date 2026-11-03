@@ -50,6 +50,8 @@ static func decorate(a: Node, style: String, img: Image, s: Dictionary, dir: int
 			_imp(a, img, s, b, dir, f)
 		"screamer":
 			_screamer(a, img, s, b, dir, f)
+		"vanguard":
+			_vanguard(a, img, s, b, dir, f)
 		"plague":
 			_plague(a, img, s, b, dir, f)
 		"overlord":
@@ -153,6 +155,34 @@ static func _screamer(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: in
 	a._rect(img, mx, my, mw, open, Color("#200810"))
 	a._rect(img, mx + 1, my + open - 1, maxi(mw - 2, 1), 1, Color("#c02840"))
 	a._rect(img, mx, my, mw, 1, Color("#f0ece0"))
+
+
+## 裂颚先锋：屠夫的配色缩小一号，下巴从中间裂开、挂在胸前一张一合，肩上顶着骨刺。
+static func _vanguard(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var hw: int = s["hw"]
+	var hh: int = s["hh"]
+	var tw: int = s["tw"]
+	var bone := Color("#e8e0c8")
+	for x: int in [b["t_left"], b["t_left"] + tw - 1]:
+		a._rect(img, x, b["t_top"] - 2, 1, 2, bone)
+	if dir == UP:
+		# 背后一排骨刺
+		for k in 3:
+			a._px(img, b["cx"] - 3 + k * 3, b["t_top"] + 2 + k % 2, bone)
+		return
+	var open: int = [2, 3, 3, 2][f] as int
+	var mx: int = b["hx"] + 1 if dir == DOWN else b["hx"] + hw - 4
+	var mw: int = hw - 2 if dir == DOWN else 5
+	var my: int = b["h_top"] + hh - 2
+	var jaw := Color(String(s["skin"])).darkened(0.25)
+	a._rect(img, mx, my, mw, open, Color("#200a0c"))
+	a._rect(img, mx - 1, my + open, mw + 2, 2, jaw)
+	for k in range(0, mw, 2):
+		a._px(img, mx + k, my, bone)
+		a._px(img, mx + k + 1, my + open - 1, bone)
+	# 下巴正中的裂口
+	var split_x: int = mx + mw / 2 if dir == DOWN else mx + mw - 2
+	a._rect(img, split_x, my + open, 1, 2, Color("#c02020"))
 
 
 ## 瘟疫母体：浑身是搏动的毒囊，嘴角滴着脓。

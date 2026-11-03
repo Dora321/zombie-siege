@@ -15,6 +15,8 @@ class Bullet:
 	var color: Color
 	var from_player: bool
 	var chill := 0.0
+	## 霰弹枪的弹丸，能打断 Boss 的连冲蓄力。
+	var buckshot := false
 	var hits: Array = []
 
 
@@ -135,6 +137,8 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 		if not b.from_player:
 			damage *= best.vulnerability()
 		best.take_damage(damage, dir, b.knock)
+		if b.buckshot:
+			best.buckshot_hit(b.knock)
 		if b.chill > 0.0:
 			best.apply_chill(b.chill)
 			game.fx.frost(best.center())

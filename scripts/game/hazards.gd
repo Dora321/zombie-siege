@@ -130,7 +130,8 @@ func warn_ring(pos: Vector2, r: float, windup: float, owner_node: Variant) -> vo
 	_zone("warn", pos, r, windup, 0.0, owner_node)
 
 
-func lane(from: Vector2, dir: Vector2, length: float, width: float, dur: float) -> void:
+## 返回通道本身，蓄力被打断时施法者可以把它撤掉。
+func lane(from: Vector2, dir: Vector2, length: float, width: float, dur: float) -> Lane:
 	var l := Lane.new()
 	l.from = from
 	l.to = from + dir * length
@@ -138,6 +139,7 @@ func lane(from: Vector2, dir: Vector2, length: float, width: float, dur: float) 
 	l.t = dur
 	l.dur = dur
 	lanes.append(l)
+	return l
 
 
 func shockwave(pos: Vector2, max_r: float, speed: float, damage: float) -> void:

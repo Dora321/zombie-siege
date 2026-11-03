@@ -112,9 +112,9 @@ func setup(g: Node, m: Node2D, zombie_kind: String, pos: Vector2, wave: int) -> 
 	# 叠加层（护盾、蓄力光圈）要盖在身体上
 	body.show_behind_parent = true
 	shadow.show_behind_parent = true
-	if is_boss:
+	if is_boss and size.x > 30:
 		shadow.texture = Art.shadow_big
-	elif kind == "tank":
+	elif kind == "tank" or is_boss:
 		shadow.texture = Art.shadow_medium
 	else:
 		shadow.texture = Art.shadow_small
@@ -227,6 +227,11 @@ func blocks_shot(dir: Vector2) -> bool:
 func shield_hit(amount: float) -> void:
 	if _brain != null:
 		_brain.shield_hit(self, amount)
+
+
+func buckshot_hit(knock: float) -> void:
+	if _brain != null and not dead:
+		_brain.on_buckshot(self, knock)
 
 
 func flash_warn(seconds: float) -> void:

@@ -367,7 +367,8 @@ func on_boss_down(z: Variant) -> void:
 	var spec: Dictionary = GameData.BOSSES[z.kind]
 	Harness.note("%s 被击败，用过的招式：%s" % [spec["title"], ",".join(z._brain.moves_used.keys())])
 	_boss_hold_t = BOSS_DOWN_HOLD
-	hud.announce("%s 倒下了！" % spec["title"], "快去捡战利品：%s" % GameData.TROPHIES[spec["trophy"]]["name"], BOSS_DOWN_HOLD)
+	var loot := "快去捡战利品：%s" % GameData.TROPHIES[spec["trophy"]]["name"] if spec.has("trophy") else "快去捡掉落的补给"
+	hud.announce("%s 倒下了！" % spec["title"], loot, BOSS_DOWN_HOLD)
 	Sfx.play("boss_down")
 	hazards.clear_owner(z)
 	for i in 5:
@@ -392,7 +393,8 @@ func _boss_loot(z: Variant) -> void:
 	for id: String in spec["drops"]:
 		pickups.drop(at, "item", 1, id)
 	pickups.drop(at, "med", 25)
-	pickups.drop(at, "trophy", 1, String(spec["trophy"]))
+	if spec.has("trophy"):
+		pickups.drop(at, "trophy", 1, String(spec["trophy"]))
 	fx.text(z.position + Vector2(0, -z.center_h * 2.0 - 12.0), "金币雨 +%d" % int(GameData.ZOMBIES[z.kind]["coins"]), Color("#ffe060"))
 
 
@@ -407,7 +409,12 @@ func _tick_special(dt: float) -> void:
 	if _acid_t > 0.0 or player == null or not player.alive:
 		return
 	_acid_t = GameData.ACID_RAIN_GAP
-	for i in GameData.ACID_RAIN_COUNT:
+	var count := GameData.ACID_RAIN_COUNT
+	# Boss 在场时酸雨变稀，地上的圈不至于和 Boss 的招式搅成一团
+	if not boss_list.is_empty():
+		_acid_t *= GameData.ACID_RAIN_BOSS_GAP
+		count = maxi(1, count - 1)
+	for i in count:
 		var at: Vector2 = player.position + player.velocity * 0.6 + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(0.0, 70.0)
 		hazards.acid(at, GameData.ACID_RAIN_DAMAGE * GameData.damage_scale(wave))
 
@@ -467,7 +474,7 @@ func _wave_tint() -> Color:
 		return Color(0.78, 0.92, 0.66)
 	if wave >= GameData.MAX_WAVE:
 		return Color(0.82, 0.58, 0.58)
-	if wave % 5 == 0:
+	if GameData.boss_wave(wave):
 		return Color(0.82, 0.68, 0.68)
 	var night := clampf(float(wave) / GameData.MAX_WAVE, 0.0, 1.0)
 	return Color(1.0, 0.97, 0.92).lerp(Color(0.62, 0.66, 0.86), night)

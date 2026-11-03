@@ -800,6 +800,7 @@ func _flow_arena(g: Variant) -> void:
 	await _arena_boss_phases(g)
 	await _arena_boss_moves(g)
 	await _arena_boss_warnings(g)
+	await _arena_boss_break(g)
 	await _arena_boss_loot(g)
 	await _arena_specials(g)
 	await _arena_reset(g)
@@ -1321,9 +1322,20 @@ func _arena_wave_table(_g: Variant) -> void:
 		for kind: String in q:
 			seen[kind] = mini(int(seen.get(kind, i + 1)), i + 1)
 	_check(GameData.WAVES.size() == GameData.MAX_WAVE, "波次表还是 15 波")
-	_check(GameData.build_spawn_queue(5).has("boss"), "第 5 波是屠夫")
-	_check(GameData.build_spawn_queue(10).has("plague"), "第 10 波是瘟疫母体")
+	_check(GameData.build_spawn_queue(2).has("vanguard"), "第 2 波是裂颚先锋")
+	_check(GameData.build_spawn_queue(4).has("boss"), "第 4 波是屠夫")
+	_check(GameData.build_spawn_queue(8).has("plague"), "第 8 波是瘟疫母体")
 	_check(GameData.build_spawn_queue(15).has("overlord"), "第 15 波是尸王")
+	var odd_boss := []
+	for wave in range(1, GameData.MAX_WAVE, 2):
+		if GameData.boss_wave(wave):
+			odd_boss.append(wave)
+	_check(odd_boss.is_empty(), "第 15 波之前的奇数波都没有 Boss %s" % [odd_boss])
+	var bosses := 0
+	for kind: String in GameData.build_spawn_queue(8):
+		if GameData.is_boss(kind):
+			bosses += 1
+	_check(bosses == 1, "第 8 波只有一只 Boss（%d）" % bosses)
 	for kind: String in ["stalker", "shielder", "splitter", "summoner", "screamer", "balloon"]:
 		_check(seen.has(kind), "波次表里会出现 %s" % kind)
 	for kind: String in GameData.BOSSES.keys():
@@ -1667,7 +1679,8 @@ func _try_move(g: Variant, z: Variant, brain: Variant, move: String, tag: String
 			for zone: Variant in g.hazards.zones:
 				if zone.kind == "rock":
 					rocks += 1
-			_check(rocks >= 3, "%s 落点全部亮圈（%d）" % [tag, rocks])
+			var want: int = 3 if move == "storm" else int(brain.phases[brain.phase].get("rocks", 3))
+			_check(rocks >= want, "%s 落点全部亮圈（%d/%d）" % [tag, rocks, want])
 			await _shot("85_rock_circles")
 		"fog", "fogring":
 			await _sec(0.7)
@@ -1803,6 +1816,66 @@ func _arena_boss_warnings(g: Variant) -> void:
 	_check(g.hazards.zones.is_empty(), "Boss 死后没落地的招式作废")
 
 
+## 屠夫狂怒的连冲：蓄力时贴脸霰弹或闪光弹能打断并硬直；第一阶段的冲撞和别的 Boss 不吃霰弹打断。
+func _arena_boss_break(g: Variant) -> void:
+	var p: Variant = g.player
+	var z: Node2D = await _break_setup(g, "boss", 1)
+	var brain: Variant = z._brain
+	brain._begin_move(z, "charge2")
+	_check(brain._breakable and g.hazards.lanes.size() == 1, "屠夫狂怒的连冲蓄力可以打断")
+	await _buckshot(g, z)
+	_check(brain._act == "" and z._charge_t <= 0.0, "贴脸一枪霰弹打断连冲蓄力（累计击退 %.0f）" % brain._brace)
+	_check(z._stun_t > 0.5, "霰弹打断后硬直（还剩 %.2f 秒）" % z._stun_t)
+	_check(g.hazards.lanes.is_empty(), "打断后冲撞通道撤掉")
+	await _shot("93_butcher_break")
+	brain._begin_move(z, "charge", true)
+	_check(brain._breakable, "连冲的第二段蓄力也能打断")
+	# 闪光弹：Boss 本来只晕一下，打断连冲时补足硬直
+	z = await _break_setup(g, "boss", 1)
+	brain = z._brain
+	brain._begin_move(z, "charge2")
+	g.ordnance._flash_burst(z.center(), float(GameData.ITEMS["flash"]["radius"]), float(GameData.ITEMS["flash"]["power"]))
+	_check(brain._act == "" and brain._chain == 0 and g.hazards.lanes.is_empty(), "闪光弹打断连冲蓄力并撤掉通道")
+	_check(z._stun_t >= brain.BREAK_STUN - 0.01, "闪光打断后硬直约 %.1f 秒（%.2f）" % [brain.BREAK_STUN, z._stun_t])
+	# 第一阶段的冲撞照旧只能闪光打断
+	z = await _break_setup(g, "boss", 0)
+	brain = z._brain
+	brain._begin_move(z, "charge")
+	_check(not brain._breakable, "屠夫第一阶段的冲撞不吃霰弹打断")
+	await _buckshot(g, z)
+	_check(brain._act == "charge" and z._stun_t <= 0.0, "霰弹打不断第一阶段的冲撞")
+	z = await _break_setup(g, "vanguard", 1)
+	z._brain._begin_move(z, "charge2")
+	_check(not z._brain._breakable, "裂颚先锋的连冲不吃霰弹打断")
+	p.switch_weapon("pistol")
+	await _arena_reset(g)
+
+
+func _break_setup(g: Variant, kind: String, phase: int) -> Node2D:
+	await _arena_reset(g)
+	var z: Node2D = _arena_spawn(g, kind, Vector2(40, 0))
+	await _sec(0.02)
+	var brain: Variant = z._brain
+	brain.phase = phase
+	brain._apply_phase(z)
+	brain._gap = 999.0
+	z._attack_t = 99.0
+	return z
+
+
+## 用真实的开火路径对着 Boss 开一枪霰弹。
+func _buckshot(g: Variant, z: Variant) -> void:
+	var p: Variant = g.player
+	p.switch_weapon("shotgun")
+	p.cooldown = 0.0
+	p.weapon_state["shotgun"]["mag"] = p.mag_size()
+	_test_bot.aim_dir = (z.center() - (p.position + Vector2(0, -7))).normalized()
+	_test_bot.firing = true
+	await _sec(0.05)
+	_test_bot.firing = false
+	await _sec(0.15)
+
+
 func _arena_boss_loot(g: Variant) -> void:
 	await _arena_reset(g)
 	var p: Variant = g.player
@@ -1829,6 +1902,18 @@ func _arena_boss_loot(g: Variant) -> void:
 	_check(g._boss_hold_t > 0.0 and g.state == g.State.COMBAT, "击败后留出捡战利品的时间")
 	await _shot("91_boss_loot")
 	g.pickups.items.clear()
+	# 裂颚先锋是小 Boss：只掉道具和急救包，没有专属战利品
+	var mini_boss: Node2D = _arena_spawn(g, "vanguard", Vector2(150, 0))
+	await _sec(0.02)
+	mini_boss._brain.phase = mini_boss._brain.phases.size() - 1
+	mini_boss.take_damage(mini_boss.max_hp * 5.0, Vector2.RIGHT, 0.0)
+	counts = {}
+	for it: Variant in g.pickups.items:
+		counts[it.kind] = int(counts.get(it.kind, 0)) + 1
+	_check(mini_boss.dead and int(counts.get("item", 0)) == GameData.BOSSES["vanguard"]["drops"].size(), "裂颚先锋掉 %d 件道具" % GameData.BOSSES["vanguard"]["drops"].size())
+	_check(int(counts.get("trophy", 0)) == 0 and int(counts.get("med", 0)) == 1, "裂颚先锋没有专属战利品，掉急救包")
+	g.pickups.items.clear()
+	g._boss_hold_t = 0.0
 	# 战利品效果
 	var max_before: float = p.max_hp
 	p.hp = 10.0
@@ -1885,6 +1970,23 @@ func _arena_specials(g: Variant) -> void:
 	_check(g.player.hp < hp0, "酸雨落地伤害玩家")
 	g.god_mode = true
 	g.player.hp = g.player.max_hp
+	# 第 8 波的瘟疫母体在场时酸雨变稀
+	g.hazards.clear()
+	var mother: Node2D = _arena_spawn(g, "plague", Vector2(150, 0))
+	await _sec(0.02)
+	mother._brain._gap = 999.0
+	g._acid_t = 0.0
+	await _sec(0.05)
+	drops = 0
+	for zone: Variant in g.hazards.zones:
+		if zone.kind == "acid":
+			drops += 1
+	_check(drops == GameData.ACID_RAIN_COUNT - 1, "Boss 在场时酸雨每轮少一滴（%d）" % drops)
+	_check(g._acid_t > GameData.ACID_RAIN_GAP * (GameData.ACID_RAIN_BOSS_GAP - 0.1), "Boss 在场时酸雨间隔拉长（%.1f 秒）" % g._acid_t)
+	mother.no_blast = true
+	mother.take_damage(99999.0, Vector2.RIGHT, 0.0, false)
+	g._boss_hold_t = 0.0
+	g.hazards.clear()
 	g.wave = 12
 	var dark: Color = g._combat_tint()
 	g.wave = 11
