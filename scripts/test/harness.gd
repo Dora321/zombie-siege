@@ -3089,6 +3089,29 @@ func _map_title_checks(title: Node) -> void:
 	_game = null
 	_send_key(KEY_ENTER, true)
 	_send_key(KEY_ENTER, false)
+	await _sec(0.1)
+	# 选完地图是行动准备：焦点在「开始行动」，方向键不外泄，Esc 回选图
+	var prep: Control = title.prep_panel
+	_check(prep.visible and not panel.visible and prep.go_button.has_focus(), "回车选图后进入行动准备，焦点在开始行动")
+	var focusables: Array = []
+	focusables.append_array(prep.danger_buttons)
+	focusables.append_array(prep.contract_buttons.values())
+	focusables.append_array([prep.back_button, prep.go_button])
+	var leaked := false
+	for c: Control in focusables:
+		for side: Side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
+			var next: Control = c.find_valid_focus_neighbor(side)
+			leaked = leaked or next == null or not prep.is_ancestor_of(next)
+	_check(not leaked, "行动准备里方向键不会跳到面板后面的按钮")
+	_send_key(KEY_ESCAPE, true)
+	_send_key(KEY_ESCAPE, false)
+	await _sec(0.1)
+	_check(panel.visible and not prep.visible and panel.cards["parking"].has_focus(), "Esc 从行动准备回到选图")
+	_send_key(KEY_ENTER, true)
+	_send_key(KEY_ENTER, false)
+	await _sec(0.1)
+	_send_key(KEY_ENTER, true)
+	_send_key(KEY_ENTER, false)
 	while _game == null:
 		await get_tree().process_frame
 	_check(_game.map.map_id == "parking", "回车进入选中的地图")
