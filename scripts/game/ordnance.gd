@@ -118,7 +118,7 @@ func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: floa
 	var to := from + dir * length
 	var hit_list: Array = []
 	for z: Variant in game.zombies_near(from.lerp(to, 0.5), length * 0.5 + 24.0):
-		if z.dead:
+		if z.dead or z.burrowed:
 			continue
 		var c: Vector2 = z.center()
 		var along := (c - from).dot(dir)
@@ -131,12 +131,16 @@ func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: floa
 	for i in mini(hit_list.size(), pierce + 1):
 		var z: Variant = hit_list[i]["z"]
 		var at: Vector2 = z.center()
+		# 镜面女皇正面：光束被弹回去，后面的也打不到了
+		if z.reflect_shot(dir, damage, "beam", true):
+			to = from + dir * float(hit_list[i]["d"])
+			break
 		# 狙击枪能打穿护盾，但伤害减半
 		if z.blocks_shot(dir):
 			z.shield_hit(damage)
-			z.take_damage(damage * SHIELD_PIERCE, dir, knock)
+			z.take_damage(damage * SHIELD_PIERCE, dir, knock, true, "beam")
 		else:
-			z.take_damage(damage, dir, knock)
+			z.take_damage(damage, dir, knock, true, "beam")
 		game.fx.spark(at)
 		game.bullets.shots_hit += 1
 		game.on_bullet_hit()
@@ -308,7 +312,7 @@ func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: 
 	for i in chain + 1:
 		var c: Vector2 = cur.center()
 		points.append(c)
-		cur.take_damage(dmg, points[points.size() - 2].direction_to(c), knock)
+		cur.take_damage(dmg, points[points.size() - 2].direction_to(c), knock, true, "arc")
 		done.append(cur)
 		game.fx.zap(c)
 		dmg *= 0.8
@@ -326,7 +330,7 @@ func _arc_first(from: Vector2, dir: Vector2, length: float) -> Variant:
 	var best: Variant = null
 	var best_score := INF
 	for z: Variant in game.zombies_near(from, length + 16.0):
-		if z.dead:
+		if z.dead or z.burrowed:
 			continue
 		var to: Vector2 = z.center() - from
 		var d := to.length()
@@ -346,7 +350,7 @@ func _arc_next(from: Vector2, jump: float, done: Array) -> Variant:
 	var best: Variant = null
 	var best_d := jump
 	for z: Variant in game.zombies_near(from, jump + 8.0):
-		if z.dead or done.has(z):
+		if z.dead or done.has(z) or z.burrowed:
 			continue
 		var d: float = z.center().distance_to(from)
 		if d < best_d:
@@ -410,16 +414,18 @@ func _step_rang(r: Rang, dt: float) -> bool:
 			r.returning = true
 			r.hits.clear()
 	for z: Variant in game.zombies_near(r.pos, 24.0):
-		if z.dead or r.hits.has(z):
+		if z.dead or r.hits.has(z) or z.burrowed:
 			continue
 		var reach: float = float(z.hit_r) + 5.0
 		if z.center().distance_squared_to(r.pos) <= reach * reach:
 			r.hits.append(z)
+			if z.reflect_shot(r.dir, r.damage, "rang", true):
+				continue
 			if z.blocks_shot(r.dir):
 				z.shield_hit(r.damage)
 				game.fx.spark(r.pos)
 				continue
-			z.take_damage(r.damage, r.dir, r.knock)
+			z.take_damage(r.damage, r.dir, r.knock, true, "rang")
 			game.bullets.shots_hit += 1
 			game.on_bullet_hit()
 	return false
@@ -472,9 +478,9 @@ func _step_nuke(dt: float) -> void:
 		_nuke_hit[z] = true
 		var dir: Vector2 = _nuke_pos.direction_to(z.position)
 		if z.is_boss:
-			z.take_damage(z.max_hp * NUKE_BOSS_HIT, dir, 200.0)
+			z.take_damage(z.max_hp * NUKE_BOSS_HIT, dir, 200.0, true, "nuke")
 		elif z.kind == "tank":
-			z.take_damage(z.max_hp * NUKE_TANK_HIT, dir, 200.0)
+			z.take_damage(z.max_hp * NUKE_TANK_HIT, dir, 200.0, true, "nuke")
 		else:
 			# 核弹清掉的自爆僵尸不再二次爆炸，分裂体也不再分裂
 			z.no_blast = true
@@ -509,7 +515,8 @@ func use_item(id: String, p: Variant) -> bool:
 			game.fx.text(over, "护甲 +%d" % int(power), Color("#c8d4e8"))
 			Sfx.play("armor")
 		"frag", "sticky":
-			_throw(id, hand, p, power * p.damage_mult(), float(spec["radius"]))
+			var mult: float = p.sticky_mult if id == "sticky" else 1.0
+			_throw(id, hand, p, power * p.damage_mult() * mult, float(spec["radius"]))
 		"flash":
 			_throw(id, hand, p, power, float(spec["radius"]))
 		"decoy":

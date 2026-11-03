@@ -56,6 +56,22 @@ static func decorate(a: Node, style: String, img: Image, s: Dictionary, dir: int
 			_plague(a, img, s, b, dir, f)
 		"overlord":
 			_overlord(a, img, s, b, dir, f)
+		"colossus":
+			_colossus(a, img, s, b, dir, f)
+		"graveborn":
+			_graveborn(a, img, s, b, dir, f)
+		"burrowlord":
+			_burrowlord(a, img, s, b, dir, f)
+		"mirror":
+			_mirror(a, img, s, b, dir, f)
+
+
+## 只往空白处画：背后的东西不能盖住已经画好的身体。
+static func _behind(a: Node, img: Image, x: int, y: int, w: int, h: int, c: Color) -> void:
+	for yy in range(y, y + h):
+		for xx in range(x, x + w):
+			if xx >= 0 and yy >= 0 and xx < img.get_width() and yy < img.get_height() and img.get_pixel(xx, yy).a <= 0.0:
+				a._px(img, xx, yy, c)
 
 
 ## 潜伏者：兜帽、发亮的眼睛、一双长爪子。
@@ -245,6 +261,196 @@ static func _overlord(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: in
 		a._rect(img, sx + 2, t_top - 8 + bob, 1, 20, Color("#f0f4ff"))
 		a._rect(img, sx - 2, t_top + 11 + bob, 7, 2, gold)
 		a._rect(img, sx, t_top + 13 + bob, 3, 3, Color("#4a3020"))
+
+
+## 覆甲巨像：一身铆着铆钉的横向甲片，整个头罩在铁盔里只留眼缝，胸口裂缝里透出熔核。
+static func _colossus(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var tw: int = s["tw"]
+	var th: int = s["th"]
+	var hw: int = s["hw"]
+	var hh: int = s["hh"]
+	var t_left: int = b["t_left"]
+	var t_top: int = b["t_top"]
+	var cx: int = b["cx"]
+	var plate := Color("#8c909c")
+	var plate_d := Color("#5a5e6a")
+	var plate_l := Color("#c4c8d4")
+	var rivet := Color("#e8dcb0")
+	for k in 3:
+		var y: int = t_top + 1 + k * 5
+		a._rect(img, t_left, y, tw, 3, plate)
+		a._rect(img, t_left, y, tw, 1, plate_l)
+		a._rect(img, t_left, y + 2, tw, 1, plate_d)
+		for x in range(t_left + 2, t_left + tw - 1, 6):
+			a._px(img, x, y + 1, rivet)
+	# 两块大肩甲，比身体宽出一截
+	a._rect(img, t_left - 5, t_top - 2, 9, 4, plate)
+	a._rect(img, t_left - 5, t_top - 2, 9, 1, plate_l)
+	a._px(img, t_left - 3, t_top, rivet)
+	if dir != SIDE:
+		a._rect(img, t_left + tw - 4, t_top - 2, 9, 4, plate)
+		a._rect(img, t_left + tw - 4, t_top - 2, 9, 1, plate_l)
+		a._px(img, t_left + tw + 2, t_top, rivet)
+	# 铁盔
+	var hx: int = b["hx"]
+	var h_top: int = b["h_top"]
+	a._rect(img, hx - 1, h_top - 1, hw + 2, hh + 1, plate_d)
+	a._rect(img, hx - 1, h_top - 1, hw + 2, 1, plate_l)
+	a._rect(img, hx + hw / 2, h_top - 3, 1, 2, plate_l)
+	if dir == UP:
+		return
+	var slit_x: int = hx if dir == DOWN else hx + hw - 4
+	var slit_w: int = hw if dir == DOWN else 4
+	a._rect(img, slit_x, h_top + 2, slit_w, 2, Color("#1c0c08"))
+	var eye := Color(String(s["eye"]))
+	if dir == DOWN:
+		a._px(img, hx + 2, h_top + 2, eye)
+		a._px(img, hx + hw - 3, h_top + 2, eye)
+	else:
+		a._px(img, hx + hw - 2, h_top + 2, eye)
+	# 胸口的裂缝和熔核，一明一暗地跳
+	var core := Color("#ffc050") if f % 2 == 0 else Color("#ff7020")
+	var core_y: int = t_top + th / 2
+	a._rect(img, cx - 1, t_top + 1, 1, th - 2, Color("#2a1810"))
+	a._disc(img, cx - 0.5, core_y, 3.0, 2.5, Color("#2a1810"))
+	a._disc(img, cx - 0.5, core_y, 2.0, 1.6, core)
+	a._px(img, cx - 1, core_y - 1, Color("#fff0b0"))
+
+
+## 再生坟主：背着一块墓碑，身上缠着苔藓和根须，胸口一枚绿色符文跟着心跳亮，脚下掉土。
+static func _graveborn(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var tw: int = s["tw"]
+	var th: int = s["th"]
+	var t_left: int = b["t_left"]
+	var t_top: int = b["t_top"]
+	var cx: int = b["cx"]
+	var stone := Color("#8a8a90")
+	var stone_d := Color("#5c5c64")
+	var moss := Color("#5a8a3a")
+	# 墓碑：背面看整块，正面和侧面只从肩膀后面露出来
+	var sx: int = cx - 7
+	var sy: int = t_top - 9
+	if dir == UP:
+		a._rect(img, sx + 1, sy, 12, 1, stone)
+		a._rect(img, sx, sy + 1, 14, 13, stone)
+		a._rect(img, sx + 13, sy + 1, 1, 13, stone_d)
+		a._rect(img, sx + 6, sy + 3, 2, 7, stone_d)
+		a._rect(img, sx + 4, sy + 5, 6, 2, stone_d)
+		a._rect(img, sx + 1, sy + 11, 4, 2, moss)
+	else:
+		_behind(a, img, sx + 1, sy, 12, 1, stone)
+		_behind(a, img, sx, sy + 1, 14, 9, stone)
+		_behind(a, img, sx + 13, sy + 1, 1, 9, stone_d)
+	# 苔藓和根须斜着缠在身上
+	for k in 4:
+		var y: int = t_top + 2 + k * 3
+		a._rect(img, t_left + (k * 5) % (tw - 4), y, 4, 1, moss)
+		a._px(img, t_left + (k * 5 + 4) % tw, y + 1, moss.darkened(0.3))
+	if dir != UP:
+		var rune := Color("#b0ff60") if f % 2 == 0 else Color("#70c040")
+		var ry: int = t_top + th / 2 - 1
+		a._rect(img, cx - 1, ry - 2, 1, 5, rune)
+		a._rect(img, cx - 3, ry, 5, 1, rune)
+		a._px(img, cx - 3, ry - 2, rune)
+		a._px(img, cx + 1, ry + 2, rune)
+	# 脚边往下掉的土块
+	var soil := Color("#5a4630")
+	for k in 3:
+		a._px(img, t_left + 3 + k * 7, b["hip"] + (f + k) % 3, soil)
+
+
+## 掘地领主：矮壮的身子，头戴矿灯，一对铲子一样的大爪，肩上落满土。
+static func _burrowlord(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var tw: int = s["tw"]
+	var hw: int = s["hw"]
+	var hh: int = s["hh"]
+	var t_left: int = b["t_left"]
+	var t_top: int = b["t_top"]
+	var hx: int = b["hx"]
+	var h_top: int = b["h_top"]
+	var dirt := Color("#7a5a38")
+	var dirt_l := Color("#a07c50")
+	# 肩上的土
+	for k in 6:
+		a._px(img, t_left + 1 + k * 4, t_top + (k % 2), dirt_l if k % 3 == 0 else dirt)
+	# 矿工头盔和矿灯
+	var helm := Color("#c8a030")
+	a._rect(img, hx - 1, h_top - 1, hw + 2, 2, helm)
+	a._rect(img, hx - 1, h_top - 1, hw + 2, 1, helm.lightened(0.3))
+	if dir != UP:
+		var lamp_x: int = hx + hw / 2 - 1 if dir == DOWN else hx + hw - 2
+		var lamp := Color("#fff8a0") if f % 2 == 0 else Color("#ffe040")
+		a._rect(img, lamp_x, h_top - 2, 3, 2, lamp)
+		# 尖鼻子
+		var nose_x: int = hx + hw / 2 - 1 if dir == DOWN else hx + hw
+		a._rect(img, nose_x, h_top + hh - 3, 2, 2, Color("#e08890"))
+	# 两只铲子一样的大爪，挖土时一上一下
+	var claw := Color("#e0d8c0")
+	var claw_d := Color("#9a9078")
+	var dig: int = [0, 1, 0, -1][f] as int
+	var sh_y: int = t_top + 3
+	if dir == SIDE:
+		var x: int = b["cx"] + tw / 2 + int(s["arm_len"])
+		a._rect(img, x, sh_y - 1 + dig, 3, 5, claw)
+		for k in 3:
+			a._rect(img, x + 3, sh_y - 1 + dig + k * 2, 2, 1, claw_d)
+		return
+	if dir == UP:
+		return
+	for side in 2:
+		var x: int = t_left - int(s["arm_w"]) - 4 if side == 0 else t_left + tw + int(s["arm_w"])
+		var y: int = sh_y + 2 + (dig if side == 0 else -dig)
+		a._rect(img, x, y, 4, 4, claw)
+		a._rect(img, x, y + 3, 4, 1, claw_d)
+		for k in 3:
+			a._px(img, x + k + (0 if side == 0 else 1), y + 4, claw)
+
+
+## 镜面女皇：长裙罩住双腿，头顶一圈镜子碎片做的冠，肩上也嵌着碎片。身前的镜子由 boss_brain 按朝向画。
+static func _mirror(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var tw: int = s["tw"]
+	var hw: int = s["hw"]
+	var t_left: int = b["t_left"]
+	var t_top: int = b["t_top"]
+	var cx: int = b["cx"]
+	var gown := Color(String(s["shirt"]))
+	var gown_d := gown.darkened(0.3)
+	var trim := Color("#c8d0e8")
+	# 长裙：从腰往下越来越宽，盖住两条腿，下摆随步子摆
+	var hip: int = b["hip"]
+	var foot: int = b["foot"]
+	var sway: int = [0, 1, 0, -1][f] as int
+	for y in range(hip - 1, foot + 1):
+		var grow: int = (y - hip + 1) / 2
+		var w: int = tw + grow * 2
+		var x: int = cx - w / 2 + (sway if y > foot - 3 else 0)
+		a._rect(img, x, y, w, 1, gown)
+		a._px(img, x + w - 1, y, gown_d)
+	var hem_w: int = tw + (foot - hip + 1) / 2 * 2
+	a._rect(img, cx - hem_w / 2 + sway, foot, hem_w, 1, trim)
+	# 银领子
+	a._rect(img, t_left, t_top, tw, 1, trim)
+	# 镜片冠
+	var shard := Color("#b8e8ff")
+	var shine := Color("#f8fcff")
+	var hx: int = b["hx"]
+	var h_top: int = b["h_top"]
+	for k in 4:
+		var x: int = hx + k * (hw - 1) / 3
+		var tall: int = 3 if k == 1 or k == 2 else 2
+		a._rect(img, x, h_top - tall, 1, tall, shard)
+		a._px(img, x, h_top - tall, shine)
+	a._rect(img, hx, h_top - 1, hw, 1, trim)
+	# 肩上的碎片
+	for x: int in [t_left - 2, t_left + tw]:
+		a._rect(img, x, t_top - 1, 2, 3, shard)
+		a._px(img, x, t_top - 1, shine)
+	if dir == DOWN:
+		# 胸前一颗菱形宝石
+		a._px(img, cx - 1, t_top + 3, shine)
+		a._px(img, cx - 2, t_top + 4, shard)
+		a._px(img, cx, t_top + 4, shard)
+		a._px(img, cx - 1, t_top + 5, shard)
 
 
 ## 分裂小怪：一团肉冻，弹跳时压扁再拉长。

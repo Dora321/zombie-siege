@@ -116,7 +116,8 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 	var best: Variant = null
 	var best_t := 2.0
 	for z: Variant in game.zombies_near(mid, seg_len * 0.5 + 24.0):
-		if z.dead or b.hits.has(z):
+		# 钻在地下的 Boss：子弹从土堆上飞过去
+		if z.dead or b.hits.has(z) or z.burrowed:
 			continue
 		var c: Vector2 = z.center()
 		var t := clampf((c - b.pos).dot(seg) / maxf(seg_len * seg_len, 0.001), 0.0, 1.0)
@@ -128,6 +129,10 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 	if best != null:
 		var dir := b.vel.normalized()
 		var damage: float = b.damage
+		var src := "buckshot" if b.buckshot else "bullet"
+		# 镜面女皇正面：子弹被弹回去
+		if best.reflect_shot(dir, damage, src, b.from_player):
+			return false
 		# 护盾兵正面：子弹停在盾上，只磨耐久
 		if best.blocks_shot(dir):
 			best.shield_hit(damage)
@@ -136,7 +141,7 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 		# 炮塔打被冻僵尸有额外加成，鼓励玩家先控场再让炮塔收割
 		if not b.from_player:
 			damage *= best.vulnerability()
-		best.take_damage(damage, dir, b.knock)
+		best.take_damage(damage, dir, b.knock, true, src)
 		if b.buckshot:
 			best.buckshot_hit(b.knock)
 		if b.chill > 0.0:

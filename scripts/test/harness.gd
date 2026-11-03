@@ -801,6 +801,11 @@ func _flow_arena(g: Variant) -> void:
 	await _arena_boss_moves(g)
 	await _arena_boss_warnings(g)
 	await _arena_boss_break(g)
+	await _arena_colossus(g)
+	await _arena_graveborn(g)
+	await _arena_burrowlord(g)
+	await _arena_mirror(g)
+	await _arena_overlord_shield(g)
 	await _arena_boss_loot(g)
 	await _arena_specials(g)
 	await _arena_reset(g)
@@ -1324,8 +1329,28 @@ func _arena_wave_table(_g: Variant) -> void:
 	_check(GameData.WAVES.size() == GameData.MAX_WAVE, "波次表还是 15 波")
 	_check(GameData.build_spawn_queue(2).has("vanguard"), "第 2 波是裂颚先锋")
 	_check(GameData.build_spawn_queue(4).has("boss"), "第 4 波是屠夫")
+	_check(GameData.build_spawn_queue(6).has("colossus"), "第 6 波是覆甲巨像")
 	_check(GameData.build_spawn_queue(8).has("plague"), "第 8 波是瘟疫母体")
+	_check(GameData.build_spawn_queue(10).has("graveborn"), "第 10 波是再生坟主")
+	_check(GameData.build_spawn_queue(12).has("burrowlord"), "第 12 波是掘地领主")
+	_check(GameData.build_spawn_queue(14).has("mirror"), "第 14 波是镜面女皇")
 	_check(GameData.build_spawn_queue(15).has("overlord"), "第 15 波是尸王")
+	var even_plain := []
+	for wave in range(2, GameData.MAX_WAVE, 2):
+		var n := 0
+		for kind: String in GameData.build_spawn_queue(wave):
+			if GameData.is_boss(kind):
+				n += 1
+		if n != 1:
+			even_plain.append(wave)
+	_check(even_plain.is_empty(), "第 2~14 波每个偶数波正好一只 Boss %s" % [even_plain])
+	var seen_boss := {}
+	for i in GameData.WAVES.size():
+		for kind: String in GameData.BOSSES.keys():
+			if GameData.WAVES[i].has(kind):
+				seen_boss[kind] = true
+	_check(seen_boss.size() == GameData.BOSSES.size(), "八道 Boss 都排进了波次表（%d/%d）" % [seen_boss.size(), GameData.BOSSES.size()])
+	_check(int(GameData.WAVES[11].get("stalker", 0)) <= 6, "第 12 波潜伏者减到 6 只以内")
 	var odd_boss := []
 	for wave in range(1, GameData.MAX_WAVE, 2):
 		if GameData.boss_wave(wave):
@@ -1654,7 +1679,8 @@ func _arena_boss_moves(g: Variant) -> void:
 				brain._gap = 999.0
 				await _try_move(g, z, brain, move, tag)
 				used[move] = true
-	var expected := ["charge", "charge2", "slam", "rocks", "storm", "fog", "fogring", "fan", "wave", "call", "elites", "shield", "scream"]
+	var expected := ["charge", "charge2", "slam", "rocks", "storm", "fog", "fogring", "fan", "wave", "call", "elites", "shield", "scream",
+		"burrow", "emerge_slam", "reflect_aura"]
 	for move: String in expected:
 		_check(used.has(move), "招式 %s 被覆盖" % move)
 
@@ -1741,6 +1767,265 @@ func _try_move(g: Variant, z: Variant, brain: Variant, move: String, tag: String
 			var minion: Node2D = _arena_spawn(g, "walker", Vector2(100, 20))
 			await _sec(0.95)
 			_check(minion.rallied(), "%s 全场尖叫鼓动僵尸" % tag)
+		"burrow":
+			_check(_dig_zone(g, "warn"), "%s 钻地前脚下亮黄圈" % tag)
+			await _sec(brain.MOVE_WARN["burrow"] + 0.05)
+			_check(brain.underground() and z.cloaked() and not z.body.visible, "%s 钻进地下，只剩土堆" % tag)
+			await _shot("94_burrow")
+			for i in 120:
+				if not brain.underground():
+					break
+				await _sec(0.05)
+			_check(not brain.underground() and z.body.visible, "%s 地下待一会儿自己出土" % tag)
+			_check(brain._act == "emerge_slam" and _dig_zone(g, "slam"), "%s 出土接黄圈重砸" % tag)
+		"emerge_slam":
+			_check(_dig_zone(g, "slam") and g.hazards.zones.size() == 1, "%s 出土重砸亮黄圈" % tag)
+			await _sec(0.8)
+			_check(g.hazards.zones.is_empty(), "%s 黄圈结算" % tag)
+		"reflect_aura":
+			await _sec(brain.MOVE_WARN["reflect_aura"] + 0.05)
+			_check(brain.aura_t > 0.0 and brain.status() == "反弹光环", "%s 张开反射光环" % tag)
+
+
+func _dig_zone(g: Variant, kind: String) -> bool:
+	for zone: Variant in g.hazards.zones:
+		if zone.kind == kind and zone.tone == "dig":
+			return true
+	return false
+
+
+func _boss_setup(g: Variant, kind: String, phase: int, offset: Vector2) -> Node2D:
+	await _arena_reset(g)
+	var z: Node2D = _arena_spawn(g, kind, offset)
+	await _sec(0.02)
+	var brain: Variant = z._brain
+	brain.phase = phase
+	brain._apply_phase(z)
+	brain._gap = 999.0
+	z._attack_t = 99.0
+	return z
+
+
+## 从玩家手上朝 z 打一发真实的子弹，等它飞到。
+func _shoot_at(g: Variant, z: Variant, damage: float) -> void:
+	var p: Variant = g.player
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	g.bullets.fire(from, from.direction_to(z.center()) * 470.0, damage, 0.0, 0.75, 0, Color.WHITE, true)
+	await _sec(0.25)
+
+
+## 覆甲巨像：单发小于 16 只结算一成；霰弹、爆炸、狙击、回旋镖算满；裸核阶段取消。
+func _arena_colossus(g: Variant) -> void:
+	var z: Node2D = await _boss_setup(g, "colossus", 0, Vector2(70, 0))
+	var brain: Variant = z._brain
+	var cases := [["bullet", 10.0, 1.0], ["bullet", 20.0, 20.0], ["arc", 12.0, 1.2], ["tick", 3.0, 0.3],
+		["buckshot", 9.0, 9.0], ["blast", 10.0, 10.0], ["beam", 10.0, 10.0], ["rang", 10.0, 10.0]]
+	for c: Array in cases:
+		var hp0: float = z.hp
+		z.take_damage(float(c[1]), Vector2.RIGHT, 0.0, false, String(c[0]))
+		_check(absf(hp0 - z.hp - float(c[2])) < 0.05, "覆甲巨像吃 %s %.0f 点实际扣 %.1f（应为 %.1f）" % [c[0], c[1], hp0 - z.hp, c[2]])
+	_check(int(brain.stats.get("floor", 0)) >= 3, "覆甲巨像记下阈值减免次数（%d）" % int(brain.stats.get("floor", 0)))
+	# 真实开火：8 发冲锋枪子弹不如一枪霰弹
+	var hp0: float = z.hp
+	for i in 8:
+		await _shoot_at(g, z, float(GameData.WEAPONS["smg"]["damage"]))
+	var smg_loss: float = hp0 - z.hp
+	hp0 = z.hp
+	await _buckshot(g, z)
+	var shot_loss: float = hp0 - z.hp
+	_check(smg_loss < 8.0 and shot_loss > smg_loss * 4.0, "冲锋枪打覆甲几乎没用（8 发 %.1f），霰弹一枪 %.1f" % [smg_loss, shot_loss])
+	g.player.switch_weapon("pistol")
+	# 裂甲：护盾照常全额吃小伤害
+	z = await _boss_setup(g, "colossus", 1, Vector2(70, 0))
+	brain = z._brain
+	brain._begin_move(z, "shield")
+	await _sec(0.75)
+	var shield0: float = brain.shield
+	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
+	_check(absf(shield0 - brain.shield - 10.0) < 0.05, "裂甲的护盾不打阈值折扣")
+	# 裸核：阈值取消
+	z = await _boss_setup(g, "colossus", 2, Vector2(70, 0))
+	hp0 = z.hp
+	z.take_damage(10.0, Vector2.RIGHT, 0.0, false, "bullet")
+	_check(absf(hp0 - z.hp - 10.0) < 0.05, "裸核阶段小伤害也算满（%.1f）" % (hp0 - z.hp))
+	await _shot("95_colossus")
+
+
+## 再生坟主：没冰没火时回血，挂冰或着火就停；回血不超过本阶段上限；崩坟回得更快。
+func _arena_graveborn(g: Variant) -> void:
+	var z: Node2D = await _boss_setup(g, "graveborn", 0, Vector2(120, 0))
+	var brain: Variant = z._brain
+	var rate: float = float(GameData.BOSSES["graveborn"]["regen"])
+	z.hp = z.max_hp * 0.8
+	var hp0: float = z.hp
+	await _sec(1.0)
+	var gain: float = z.hp - hp0
+	_check(absf(gain - rate * z.max_hp) < rate * z.max_hp * 0.2, "再生坟主每秒回 %.0f 血（应约 %.0f）" % [gain, rate * z.max_hp])
+	_check(brain.status() == "再生中" and z.boss_info()["status"] == "再生中", "血条旁写着再生中")
+	await _shot("96_graveborn_regen")
+	z.apply_chill(0.05)
+	hp0 = z.hp
+	await _sec(1.0)
+	_check(z.hp <= hp0 + 0.01 and brain.status() == "再生被压住", "挂上冰就不回血（%.1f）" % (z.hp - hp0))
+	await _sec(1.0)
+	z.ignite(1.0)
+	hp0 = z.hp
+	await _sec(0.5)
+	_check(z.hp < hp0, "着火时只掉血不回血（%.1f）" % (z.hp - hp0))
+	await _sec(1.0)
+	_check(brain.status() == "再生中", "冰火都没了又开始再生")
+	# 第二阶段的上限是 55%，回不到上一阶段
+	z = await _boss_setup(g, "graveborn", 1, Vector2(120, 0))
+	brain = z._brain
+	var cap: float = float(GameData.BOSSES["graveborn"]["phases"][1]["at"]) * z.max_hp
+	z.hp = cap - 2.0
+	await _sec(1.0)
+	_check(z.hp <= cap + 0.01 and z.hp > cap - 1.0, "再生最多回到本阶段上限（%.0f/%.0f）" % [z.hp, cap])
+	z = await _boss_setup(g, "graveborn", 2, Vector2(120, 0))
+	var fast: float = float(GameData.BOSSES["graveborn"]["phases"][2]["regen"])
+	z.hp = z.max_hp * 0.1
+	hp0 = z.hp
+	await _sec(1.0)
+	_check(absf(z.hp - hp0 - fast * z.max_hp) < fast * z.max_hp * 0.2, "崩坟阶段再生更快（%.0f）" % (z.hp - hp0))
+	# 战利品「坟主骨灰」让冰和火多挂 0.5 秒
+	g.player.status_bonus = GameData.TROPHY_STATUS_TIME
+	z.apply_chill(0.05)
+	_check(absf(z._chill_t - GameData.CHILL_TIME - GameData.TROPHY_STATUS_TIME) < 0.01, "坟主骨灰让减速多 0.5 秒")
+	z.ignite(1.0)
+	_check(absf(z._burn_t - 1.0 - GameData.TROPHY_STATUS_TIME) < 0.01, "坟主骨灰让燃烧多 0.5 秒")
+	g.player.status_bonus = 0.0
+
+
+## 掘地领主：地下子弹和狙击打不到，爆炸、地上的火、闪光把它逼出来并硬直。
+func _arena_burrowlord(g: Variant) -> void:
+	var p: Variant = g.player
+	var z: Node2D = await _boss_setup(g, "burrowlord", 0, Vector2(110, 0))
+	var brain: Variant = z._brain
+	brain._begin_move(z, "burrow")
+	await _sec(brain.MOVE_WARN["burrow"] + 0.05)
+	_check(brain.underground() and z.boss_info()["status"] == "在地下", "掘地领主钻进地下，血条写着在地下")
+	var hp0: float = z.hp
+	await _shoot_at(g, z, 30.0)
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	g.ordnance.beam(from, from.direction_to(z.center()), 520.0, 95.0, 0.0, 4)
+	z.take_damage(30.0, Vector2.RIGHT, 0.0, false, "bullet")
+	_check(z.hp == hp0 and brain.underground(), "地下时子弹和狙击都打不到")
+	g.explode(z.center(), 12.0, 30.0, true, true)
+	_check(not brain.underground() and z.body.visible and z._stun_t > 0.9, "爆炸把它逼出地面并硬直（%.2f 秒）" % z._stun_t)
+	_check(z.hp < hp0, "逼出来的那一下爆炸照样掉血")
+	await _shot("97_burrow_forced")
+	await _sec(1.05)
+	brain._begin_move(z, "burrow")
+	await _sec(brain.MOVE_WARN["burrow"] + 0.05)
+	g.ordnance._flash_burst(z.center(), float(GameData.ITEMS["flash"]["radius"]), float(GameData.ITEMS["flash"]["power"]))
+	_check(not brain.underground() and z._stun_t > 0.9, "闪光弹把它逼出地面（硬直 %.2f 秒）" % z._stun_t)
+	await _sec(1.05)
+	brain._begin_move(z, "burrow")
+	await _sec(brain.MOVE_WARN["burrow"] + 0.05)
+	g.ordnance.add_fire(z.position)
+	await _sec(0.3)
+	_check(not brain.underground() and int(brain.stats.get("forced_out", 0)) == 3, "地上的火也能逼它出来（累计 %d 次）" % int(brain.stats.get("forced_out", 0)))
+	g.ordnance.clear_field()
+	# 塌方阶段钻地时间更短
+	z = await _boss_setup(g, "burrowlord", 2, Vector2(200, 0))
+	brain = z._brain
+	brain._begin_move(z, "burrow")
+	await _sec(brain.MOVE_WARN["burrow"] + 0.02)
+	var short: Array = GameData.BOSSES["burrowlord"]["phases"][2]["burrow"]
+	_check(brain._burrow_t <= float(short[1]), "塌方阶段地下待得更短（%.1f 秒）" % brain._burrow_t)
+	# 战利品「掘地晶石」：玩家的爆炸打 Boss 多 10%
+	z = await _boss_setup(g, "burrowlord", 0, Vector2(110, 0))
+	hp0 = z.hp
+	g.explode(z.center(), 10.0, 30.0, true, true)
+	var plain: float = hp0 - z.hp
+	p.blast_boss_mult = GameData.TROPHY_BLAST_BOSS
+	hp0 = z.hp
+	g.explode(z.center(), 10.0, 30.0, true, true)
+	_check(absf((hp0 - z.hp) / plain - GameData.TROPHY_BLAST_BOSS) < 0.02, "掘地晶石让爆炸打 Boss 多 10%%（%.1f → %.1f）" % [plain, hp0 - z.hp])
+	p.blast_boss_mult = 1.0
+
+
+## 镜面女皇：正面的子弹和狙击弹回去伤玩家，背后、电弧、爆炸照打；反射光环期间连背后的直射也弹，闪光能打断读条。
+func _arena_mirror(g: Variant) -> void:
+	var p: Variant = g.player
+	var z: Node2D = await _boss_setup(g, "mirror", 0, Vector2(70, 0))
+	var brain: Variant = z._brain
+	var from: Vector2 = p.position + Vector2(0, -p.HAND_H)
+	var dir: Vector2 = from.direction_to(z.center())
+	g.god_mode = false
+	p.invuln = 0.0
+	brain.face = -dir
+	var hp0: float = z.hp
+	var php0: float = p.hp
+	await _shoot_at(g, z, 40.0)
+	_check(z.hp == hp0 and p.hp < php0, "正面的子弹被弹回来伤到玩家（%.1f）" % (php0 - p.hp))
+	_check(php0 - p.hp <= brain.REFLECT_CAP + 0.01, "正面反弹的伤害有上限")
+	await _shot("98_mirror_reflect")
+	p.invuln = 0.0
+	php0 = p.hp
+	brain.face = -dir
+	g.ordnance.beam(from, dir, 520.0, 95.0, 0.0, 4)
+	_check(z.hp == hp0 and p.hp < php0, "正面的狙击光束也被弹回来")
+	brain.face = dir
+	await _shoot_at(g, z, 40.0)
+	_check(z.hp < hp0, "从背后打得动（%.0f）" % (hp0 - z.hp))
+	brain.face = -dir
+	hp0 = z.hp
+	g.ordnance.arc(from, dir, 150.0, 20.0, 0, 64.0, 0.0)
+	_check(z.hp < hp0, "电弧不看朝向")
+	hp0 = z.hp
+	g.explode(z.center(), 10.0, 30.0, true, true)
+	_check(z.hp < hp0, "爆炸不看朝向")
+	# 战利品「镜面碎片」：反弹伤害再减半
+	p.reflect_mult = GameData.TROPHY_REFLECT
+	await _sec(0.6)
+	p.invuln = 0.0
+	php0 = p.hp
+	brain.face = -dir
+	await _shoot_at(g, z, 40.0)
+	_check(absf(php0 - p.hp - 40.0 * brain.REFLECT_MULT * GameData.TROPHY_REFLECT) < 0.05, "镜面碎片让反弹伤害减半（%.1f）" % (php0 - p.hp))
+	p.reflect_mult = 1.0
+	# 万镜：光环期间背后的子弹也弹回
+	z = await _boss_setup(g, "mirror", 2, Vector2(70, 0))
+	brain = z._brain
+	brain._begin_move(z, "reflect_aura")
+	await _sec(brain.MOVE_WARN["reflect_aura"] + 0.05)
+	_check(brain.aura_t > 0.0, "万镜张开反射光环")
+	brain.face = dir
+	hp0 = z.hp
+	p.invuln = 0.0
+	php0 = p.hp
+	await _shoot_at(g, z, 30.0)
+	_check(z.hp == hp0 and p.hp < php0, "光环期间背后的子弹也被弹回（%.1f）" % (php0 - p.hp))
+	hp0 = z.hp
+	g.explode(z.center(), 10.0, 30.0, true, true)
+	_check(z.hp < hp0, "光环挡不住爆炸")
+	await _shot("99_mirror_aura")
+	await _sec(brain.AURA_T)
+	_check(brain.aura_t <= 0.0, "光环 %.1f 秒后消失" % brain.AURA_T)
+	brain._begin_move(z, "reflect_aura")
+	z.stun(0.3)
+	await _sec(1.1)
+	_check(brain._act == "" and brain.aura_t <= 0.0, "闪光打断光环读条")
+	g.god_mode = true
+	p.hp = p.max_hp
+
+
+## 尸王：围城阶段能张一次薄盾，同阶段不再张第二次；后面的阶段照旧。
+func _arena_overlord_shield(g: Variant) -> void:
+	var z: Node2D = await _boss_setup(g, "overlord", 0, Vector2(90, 0))
+	var brain: Variant = z._brain
+	_check(brain._can_use(z, "shield", 90.0), "尸王第一阶段的招式池里有护盾")
+	brain._begin_move(z, "shield")
+	await _sec(0.75)
+	_check(brain.shield > 0.0, "尸王开局张开薄盾")
+	z.take_damage(brain.shield + 1.0, Vector2.RIGHT, 0.0, false)
+	_check(brain.shield <= 0.0 and not brain._can_use(z, "shield", 90.0), "围城阶段的护盾只放一次")
+	brain.phase = 2
+	brain._phase_used.clear()
+	_check(brain._can_use(z, "shield", 90.0), "瘟疫之息阶段照旧能反复张盾")
+	var elites: Array = GameData.BOSSES["overlord"]["elites"]
+	_check(elites == ["stalker", "shielder", "splitter", "summoner", "screamer", "balloon"], "尸王号令池还是原来的六种精英")
 
 
 ## 危险提示的意义：蓄力期间不掉血、站在圈外不掉血、站在圈内才掉血，晕眩能打断。
@@ -1913,6 +2198,24 @@ func _arena_boss_loot(g: Variant) -> void:
 	_check(mini_boss.dead and int(counts.get("item", 0)) == GameData.BOSSES["vanguard"]["drops"].size(), "裂颚先锋掉 %d 件道具" % GameData.BOSSES["vanguard"]["drops"].size())
 	_check(int(counts.get("trophy", 0)) == 0 and int(counts.get("med", 0)) == 1, "裂颚先锋没有专属战利品，掉急救包")
 	g.pickups.items.clear()
+	# 后四个 Boss：各掉自己的道具和战利品
+	for kind: String in ["colossus", "graveborn", "burrowlord", "mirror"]:
+		var boss: Node2D = _arena_spawn(g, kind, Vector2(150, 0))
+		await _sec(0.02)
+		boss._brain.phase = boss._brain.phases.size() - 1
+		boss.take_damage(boss.max_hp * 5.0, Vector2.RIGHT, 0.0)
+		var trophies := []
+		var items := 0
+		for it: Variant in g.pickups.items:
+			if it.kind == "trophy":
+				trophies.append(it.id)
+			elif it.kind == "item":
+				items += 1
+		var want: Dictionary = GameData.BOSSES[kind]
+		_check(boss.dead and trophies == [want["trophy"]] and items == want["drops"].size(), "%s 掉 %d 件道具和战利品 %s" % [kind, items, trophies])
+		_check(Art.trophy_tex.has(want["trophy"]), "%s 的战利品有图标" % kind)
+		g.pickups.items.clear()
+		g._boss_hold_t = 0.0
 	g._boss_hold_t = 0.0
 	# 战利品效果
 	var max_before: float = p.max_hp
@@ -1928,6 +2231,15 @@ func _arena_boss_loot(g: Variant) -> void:
 	await _sec(1.2)
 	_check(g.score == score_before + GameData.TROPHY_SCORE, "尸王之冠加分")
 	p.dot_mult = 1.0
+	for id: String in ["plating", "ash", "soil", "shard"]:
+		g.pickups.drop(p.position, "trophy", 1, id)
+	await _sec(1.2)
+	_check(p.sticky_mult == GameData.TROPHY_STICKY and p.status_bonus == GameData.TROPHY_STATUS_TIME, "巨像甲片加粘弹伤害，坟主骨灰延长冰火")
+	_check(p.blast_boss_mult == GameData.TROPHY_BLAST_BOSS and p.reflect_mult == GameData.TROPHY_REFLECT, "掘地晶石加爆炸打 Boss，镜面碎片减反弹")
+	p.sticky_mult = 1.0
+	p.status_bonus = 0.0
+	p.blast_boss_mult = 1.0
+	p.reflect_mult = 1.0
 	# 通关瞬间地上的战利品也要算数
 	score_before = g.score
 	g.pickups.drop(p.position + Vector2(400, 0), "trophy", 1, "crown")

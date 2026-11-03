@@ -28,6 +28,8 @@ var idle_anim := 0.0
 var master: Variant = null
 var overkill := false
 var dismissed := false
+## 掘地领主钻在地下。子弹判定的热循环直接读这个字段，不走 brain。
+var burrowed := false
 
 var _speed := 30.0
 var _damage := 5.0
@@ -161,6 +163,8 @@ func _physics_process(dt: float) -> void:
 	_tick_status(dt)
 	if dead:
 		return
+	if _brain != null:
+		_brain.tick(self, dt)
 	if _frozen_t > 0.0 or _stun_t > 0.0:
 		# 冻住和眩晕时站着不动，只吃击退
 		_move_by(_knock * dt)
@@ -222,6 +226,11 @@ func cloaked() -> bool:
 
 func blocks_shot(dir: Vector2) -> bool:
 	return _brain != null and _brain.blocks(self, dir)
+
+
+## 镜面女皇：这一发直射有没有被弹回去。src 同 take_damage。
+func reflect_shot(dir: Vector2, damage: float, src: String, from_player: bool) -> bool:
+	return _brain != null and not dead and _brain.reflect_shot(self, dir, damage, src, from_player)
 
 
 func shield_hit(amount: float) -> void:
@@ -487,7 +496,7 @@ func apply_chill(amount: float) -> void:
 	if dead:
 		return
 	_burn_t = 0.0
-	_chill_t = GameData.CHILL_TIME
+	_chill_t = GameData.CHILL_TIME + _status_bonus()
 	_chill += amount
 	if _chill >= 1.0 and not is_boss and _frozen_t <= 0.0:
 		_chill = 0.0
@@ -514,10 +523,15 @@ func stun(seconds: float) -> void:
 func ignite(seconds: float) -> void:
 	if dead:
 		return
-	_burn_t = maxf(_burn_t, seconds)
+	_burn_t = maxf(_burn_t, seconds + _status_bonus())
 	_chill = 0.0
 	_chill_t = 0.0
 	_frozen_t = 0.0
+
+
+## 战利品「坟主骨灰」：冰冻和燃烧多挂一会儿。
+func _status_bonus() -> float:
+	return float(game.player.status_bonus) if game.player != null else 0.0
 
 
 ## 火焰这类高频小伤害：不飘血不出声，攒够才飘一次字。
@@ -526,7 +540,7 @@ func take_tick(amount: float) -> void:
 		return
 	var dealt := amount * vulnerability()
 	if _brain != null:
-		dealt = _brain.absorb(self, dealt)
+		dealt = _brain.absorb(self, dealt, "tick")
 	hp -= dealt
 	_dot_shown += dealt
 	if _dot_shown >= 10.0:
@@ -569,8 +583,9 @@ func _tick_status(dt: float) -> void:
 		queue_redraw()
 
 
-## 子弹、爆炸都走这里。
-func take_damage(amount: float, dir: Vector2, knock: float, show_number := true) -> void:
+## 子弹、爆炸都走这里。src 标明伤害来源（bullet/buckshot/beam/arc/rang/blast/nuke），
+## Boss 的覆甲、钻地要看它；脚本直接扣血留空。
+func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "") -> void:
 	if dead:
 		return
 	amount *= vulnerability()
@@ -578,7 +593,7 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true)
 		overkill = true
 		no_blast = true
 	elif _brain != null:
-		amount = _brain.absorb(self, amount)
+		amount = _brain.absorb(self, amount, src)
 		_brain.on_hit(self)
 		if amount <= 0.0:
 			# 打在护盾或无敌阶段上：有火花没有血

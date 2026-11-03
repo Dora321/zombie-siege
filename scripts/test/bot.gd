@@ -174,12 +174,22 @@ func _pick_weapon(p: Variant, nearest_d: float, target: Variant) -> void:
 	var pick := "pistol"
 	if nearest_d < 50.0 and _usable(p, "flamer"):
 		pick = "flamer"
-	elif target.kind == "shielder" and target._brain.up:
-		# 护盾兵不走正面：优先范围武器和电弧
+	elif target.kind == "shielder" and target._brain.up or target.kind == "mirror":
+		# 护盾兵和镜面女皇不走正面：优先范围武器和电弧
 		if target_d < 150.0 and _usable(p, "arc"):
 			pick = "arc"
 		elif target_d < 170.0 and target_d > 50.0 and _usable(p, "grenade"):
 			pick = "grenade"
+		elif target_d < 70.0 and _usable(p, "flamer"):
+			pick = "flamer"
+		elif _usable(p, "smg"):
+			pick = "smg"
+	elif target.kind == "graveborn" and target._chill_t <= 0.0 and target._burn_t <= 0.0:
+		# 再生坟主：先挂冰或火压住再生
+		if target_d < 70.0 and _usable(p, "flamer"):
+			pick = "flamer"
+		elif target_d < 140.0 and _usable(p, "cryo"):
+			pick = "cryo"
 		elif _usable(p, "smg"):
 			pick = "smg"
 	elif nearest_d < 60.0 and _usable(p, "shotgun"):

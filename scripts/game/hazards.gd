@@ -19,6 +19,8 @@ class Zone:
 	var from: Variant
 	var spawn_kind: String
 	var owner_ref: Variant
+	## "dig" 是掘地领主的高对比黄圈。
+	var tone := ""
 
 
 class Cloud:
@@ -95,8 +97,8 @@ func _zone(kind: String, pos: Vector2, r: float, windup: float, damage: float, o
 	return z
 
 
-func slam(pos: Vector2, r: float, damage: float, windup: float, owner_node: Variant) -> void:
-	_zone("slam", pos, r, windup, damage, owner_node)
+func slam(pos: Vector2, r: float, damage: float, windup: float, owner_node: Variant, tone := "") -> void:
+	_zone("slam", pos, r, windup, damage, owner_node).tone = tone
 
 
 ## 从 from 抛过来的石头；from 为 null 时从天而降。
@@ -126,8 +128,8 @@ func spawn_circle(kind: String, pos: Vector2, owner_node: Variant, windup: float
 
 
 ## 只是预警圈（比如冲击波起手），落地时什么都不做。
-func warn_ring(pos: Vector2, r: float, windup: float, owner_node: Variant) -> void:
-	_zone("warn", pos, r, windup, 0.0, owner_node)
+func warn_ring(pos: Vector2, r: float, windup: float, owner_node: Variant, tone := "") -> void:
+	_zone("warn", pos, r, windup, 0.0, owner_node).tone = tone
 
 
 ## 返回通道本身，蓄力被打断时施法者可以把它撤掉。
@@ -284,6 +286,11 @@ func _draw_zone(z: Zone) -> void:
 			fill = Color(0.5, 0.9, 0.2, 0.1 + ratio * 0.25)
 		"acid", "bomb":
 			fill = Color(0.6, 0.9, 0.2, 0.12 + ratio * 0.22)
+	if z.tone == "dig":
+		# 断电时颜色超过 1，被全局变暗后依然是亮黄
+		var k := 2.1 if GameData.wave_special(game.wave) == "blackout" else 1.0
+		edge = Color(1.0 * k, 0.87 * k, 0.12 * k)
+		fill = Color(1.0, 0.85, 0.1, 0.14 + ratio * 0.24)
 	if ratio > 0.7 and int(z.t * 18.0) % 2 == 0:
 		edge = Color("#fff0c0")
 	draw_circle(at, z.r, fill)

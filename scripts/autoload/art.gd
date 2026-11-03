@@ -87,10 +87,30 @@ const CHARS := {
 		"skin": "#b07c6c", "hair": "#3a1c1c", "shirt": "#8a3c34", "pants": "#2c2228",
 		"shoe": "#181418", "eye": "#ffe040", "arm_w": 2, "arm_len": 6, "lean": 1, "pads": true,
 	},
+	"colossus": {
+		"w": 44, "h": 40, "hw": 9, "hh": 7, "tw": 26, "th": 16, "lh": 7, "zombie": true, "style": "colossus",
+		"skin": "#8a8478", "hair": "#2a2620", "shirt": "#5c5a64", "pants": "#34323a",
+		"shoe": "#18161c", "eye": "#ff8030", "arm_w": 5, "arm_len": 6, "pads": true,
+	},
 	"plague": {
 		"w": 42, "h": 38, "hw": 8, "hh": 6, "tw": 26, "th": 20, "lh": 4, "zombie": true, "style": "plague",
 		"skin": "#7a9a50", "hair": "#3c5028", "shirt": "#5e7a38", "pants": "#2c3820",
 		"shoe": "#181e12", "eye": "#e0ff40", "arm_w": 3, "arm_len": 5, "round": true,
+	},
+	"graveborn": {
+		"w": 38, "h": 36, "hw": 9, "hh": 7, "tw": 20, "th": 14, "lh": 6, "zombie": true, "style": "graveborn",
+		"skin": "#7c8a6c", "hair": "#2c2a20", "shirt": "#4a4436", "pants": "#2c281e",
+		"shoe": "#16140e", "eye": "#a0ff60", "arm_w": 4, "arm_len": 6,
+	},
+	"burrowlord": {
+		"w": 40, "h": 32, "hw": 10, "hh": 6, "tw": 22, "th": 11, "lh": 4, "zombie": true, "style": "burrowlord",
+		"skin": "#a07858", "hair": "#3a2a1c", "shirt": "#6a4a30", "pants": "#3a2a1c",
+		"shoe": "#1c140c", "eye": "#ffe040", "arm_w": 4, "arm_len": 5, "lean": 1,
+	},
+	"mirror": {
+		"w": 30, "h": 40, "hw": 8, "hh": 8, "tw": 12, "th": 13, "lh": 8, "zombie": true, "style": "mirror",
+		"skin": "#c8c0d8", "hair": "#2a2040", "shirt": "#4a3a7a", "pants": "#3a2c60",
+		"shoe": "#1c1630", "eye": "#80f0ff", "arm_w": 2, "arm_len": 5,
 	},
 	"overlord": {
 		"w": 48, "h": 46, "hw": 11, "hh": 9, "tw": 26, "th": 16, "lh": 8, "zombie": true, "style": "overlord",
@@ -139,6 +159,10 @@ const DAMAGE_POTION := ["...kk....", "...ss....", "..ssss...", ".srrrrs..", "srr
 const TROPHY_HEART := [".rr...rr.", "rlrr.rrrr", "rrrrrrrrr", "rrrrrrrrd", ".rrrrrrd.", "..rrrrd..", "...rrd..."]
 const TROPHY_SERUM := ["...kk....", "...ss....", "...ss....", "..snns...", ".snGGns..", ".snnnns..", "..ssss..."]
 const TROPHY_CROWN := ["y...y...y", "yy.yyy.yy", "yyyyyyyyy", "yryybyyry", "yyyyyyyyy", "ddddddddd"]
+const TROPHY_PLATING := [".sssssss.", "swsssswss", "sssssssss", "hhhhhhhhh", "sssssssss", "swsssswss", ".hhhhhhh."]
+const TROPHY_ASH := ["..kkkkk..", "...ggg...", "..ggggg..", ".gghhhgg.", ".gnnnnng.", ".ggggggg.", "..ggggg.."]
+const TROPHY_SOIL := ["....y....", "...yyy...", "..yywyy..", ".mmyyymm.", "mmmmmmmmm", "mdmmdmmdm", ".ddddddd."]
+const TROPHY_SHARD := ["......w..", ".....wb..", "....wbb..", "...wbbs..", "..wbbs...", ".wbbs....", ".bss....."]
 const NUKE := ["kkkkkkkkk", "kyyyyyyyk", "kykkkkyyk", "kyykkyyyk", "kyyykyyyk", "kyyyyyyyk", "kkkkkkkkk"]
 const DECOY_BODY := ["...sss...", "...sss...", "m..www..m", "mmywwwymm", "...www...", "...www...", "...www...", "...d.d...", "...d.d...", "..dd.dd.."]
 const MISC_PAL := {
@@ -226,7 +250,7 @@ func char_image(kind: String, dir: int, index: int) -> Image:
 
 ## 把图集里的图片合成一张预览图，供开发时肉眼检查。
 func debug_sheet() -> Image:
-	var sheet := Image.create_empty(640, 512, false, Image.FORMAT_RGBA8)
+	var sheet := Image.create_empty(640, 720, false, Image.FORMAT_RGBA8)
 	sheet.fill(Color(0.3, 0.42, 0.26))
 	var y := 2
 	for kind in CHARS.keys():
@@ -659,6 +683,10 @@ func _build_items(_rng: RandomNumberGenerator) -> void:
 		"heart": _tex(_ascii(TROPHY_HEART, MISC_PAL)),
 		"serum": _tex(_ascii(TROPHY_SERUM, MISC_PAL)),
 		"crown": _tex(_ascii(TROPHY_CROWN, MISC_PAL)),
+		"plating": _tex(_ascii(TROPHY_PLATING, MISC_PAL)),
+		"ash": _tex(_ascii(TROPHY_ASH, MISC_PAL)),
+		"soil": _tex(_ascii(TROPHY_SOIL, MISC_PAL)),
+		"shard": _tex(_ascii(TROPHY_SHARD, MISC_PAL)),
 	}
 	shadow_small = _tex(_shadow(11, 4))
 	shadow_medium = _tex(_shadow(19, 6))

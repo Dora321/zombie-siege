@@ -14,9 +14,14 @@ func decide(_z: Variant, _dt: float, _player_ok: bool) -> Variant:
 	return null
 
 
-## 伤害结算前过滤一次，返回实际扣血量。
-func absorb(_z: Variant, amount: float) -> float:
+## 伤害结算前过滤一次，返回实际扣血量。src 是伤害来源，见 boss_brain.gd。
+func absorb(_z: Variant, amount: float, _src := "") -> float:
 	return amount
+
+
+## 每帧都调用，晕眩和冰冻时也不停。
+func tick(_z: Variant, _dt: float) -> void:
+	pass
 
 
 func on_hit(_z: Variant) -> void:
@@ -47,6 +52,16 @@ func shield_hit(_z: Variant, _amount: float) -> void:
 
 ## 是否处于隐身状态。隐身时炮塔和小地图都看不到。
 func cloaked() -> bool:
+	return false
+
+
+## 钻在地下：子弹、光束、电弧和回旋镖都打不到。
+func underground() -> bool:
+	return false
+
+
+## 子弹打中前问一次是否被弹回去，返回 true 表示这一发作废。
+func reflect_shot(_z: Variant, _dir: Vector2, _damage: float, _src: String, _from_player: bool) -> bool:
 	return false
 
 

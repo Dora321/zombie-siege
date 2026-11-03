@@ -676,9 +676,12 @@ func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool,
 		if d < radius + float(z.hit_r):
 			var falloff := 1.0 - clampf(d / (radius + 12.0), 0.0, 0.7)
 			var mult := 2.2 if friendly else 1.4
+			# 战利品「掘地晶石」：玩家的爆炸打 Boss 更疼
+			if friendly and z.is_boss:
+				mult *= player.blast_boss_mult
 			# 爆炸不看朝向，还会狠狠削一下盾
 			z.shield_hit(damage * falloff * mult)
-			z.take_damage(damage * falloff * mult, pos.direction_to(z.center()), 160.0)
+			z.take_damage(damage * falloff * mult, pos.direction_to(z.center()), 160.0, true, "blast")
 	if player != null and player.alive:
 		var pd: float = pos.distance_to(player.position + Vector2(0, -6))
 		if pd < radius:

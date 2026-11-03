@@ -6,7 +6,9 @@ const PAGES: Array = [
 	{"title": "精英僵尸（一）", "kinds": ["stalker", "shielder", "splitter", "splitling"]},
 	{"title": "精英僵尸（二）", "kinds": ["summoner", "imp", "screamer", "balloon"]},
 	{"title": "Boss（一）", "kinds": ["vanguard", "boss"]},
-	{"title": "Boss（二）", "kinds": ["plague", "overlord"]},
+	{"title": "Boss（二）", "kinds": ["colossus", "plague"]},
+	{"title": "Boss（三）", "kinds": ["graveborn", "burrowlord"]},
+	{"title": "Boss（四）", "kinds": ["mirror", "overlord"]},
 ]
 const ROW_H := 50
 const TOP := 26

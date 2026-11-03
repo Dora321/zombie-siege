@@ -138,10 +138,18 @@ const TROPHIES := {
 	"heart": {"name": "屠夫之心", "desc": "生命上限 +25 并回满"},
 	"serum": {"name": "母体血清", "desc": "毒雾和酸液伤害减半"},
 	"crown": {"name": "尸王之冠", "desc": "分数 +3000"},
+	"plating": {"name": "巨像甲片", "desc": "粘性炸弹伤害 +15%"},
+	"ash": {"name": "坟主骨灰", "desc": "冰冻和燃烧多持续 0.5 秒"},
+	"soil": {"name": "掘地晶石", "desc": "手雷、粘弹和榴弹对 Boss 伤害 +10%"},
+	"shard": {"name": "镜面碎片", "desc": "镜面反弹的伤害再减半"},
 }
 const TROPHY_HP := 25.0
 const TROPHY_DOT := 0.5
 const TROPHY_SCORE := 3000
+const TROPHY_STICKY := 1.15
+const TROPHY_STATUS_TIME := 0.5
+const TROPHY_BLAST_BOSS := 1.1
+const TROPHY_REFLECT := 0.5
 
 ## 僵尸属性：hit_r 是子弹判定半径，center 是身体中心离脚底的高度。
 ## desc 和 tip 是图鉴文案，is_boss 的配置在 BOSSES。
@@ -228,10 +236,34 @@ const ZOMBIES := {
 		"coins": 140, "score": 600, "hit_r": 15.0, "center": 15.0, "knock_res": 0.96, "aggro": 140.0,
 		"blood": "#6e1414", "is_boss": true,
 	},
+	"colossus": {
+		"name": "覆甲巨像", "hp": 1100.0, "speed": 18.0, "damage": 32.0, "attack_cd": 1.5,
+		"coins": 180, "score": 900, "hit_r": 16.0, "center": 16.0, "knock_res": 0.97, "aggro": 140.0,
+		"blood": "#5a4a3a", "is_boss": true,
+		"desc": "一身厚甲，小口径子弹几乎打不动", "tip": "小伤害无效，换霰弹、狙击、榴弹、回旋镖或粘弹",
+	},
 	"plague": {
 		"name": "瘟疫母体", "hp": 1350.0, "speed": 20.0, "damage": 28.0, "attack_cd": 1.5,
 		"coins": 240, "score": 1200, "hit_r": 16.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
 		"blood": "#5e8a20", "is_boss": true,
+	},
+	"graveborn": {
+		"name": "再生坟主", "hp": 1500.0, "speed": 19.0, "damage": 30.0, "attack_cd": 1.4,
+		"coins": 280, "score": 1400, "hit_r": 15.0, "center": 15.0, "knock_res": 0.97, "aggro": 150.0,
+		"blood": "#4a5a32", "is_boss": true,
+		"desc": "不挂冰也不着火时，每秒都在回血", "tip": "先用冰或火压住再生，再集火",
+	},
+	"burrowlord": {
+		"name": "掘地领主", "hp": 1600.0, "speed": 24.0, "damage": 32.0, "attack_cd": 1.3,
+		"coins": 320, "score": 1700, "hit_r": 15.0, "center": 13.0, "knock_res": 0.97, "aggro": 160.0,
+		"blood": "#6a4a2a", "is_boss": true,
+		"desc": "钻进地下时子弹打不到，出土就是一记重砸", "tip": "往土堆扔爆炸、喷火或闪光，把它逼出来",
+	},
+	"mirror": {
+		"name": "镜面女皇", "hp": 1800.0, "speed": 21.0, "damage": 30.0, "attack_cd": 1.3,
+		"coins": 380, "score": 2000, "hit_r": 14.0, "center": 17.0, "knock_res": 0.97, "aggro": 160.0,
+		"blood": "#5a3a6a", "is_boss": true,
+		"desc": "身前的镜子把子弹和狙击弹回来", "tip": "绕到背后，或用榴弹、电弧、火焰",
 	},
 	"overlord": {
 		"name": "尸王", "hp": 2700.0, "speed": 23.0, "damage": 36.0, "attack_cd": 1.3,
@@ -243,6 +275,9 @@ const ZOMBIES := {
 ## Boss 的阶段表。at 是进入该阶段的血量比例，moves 是招式池，enter 是一进阶段就放的招。
 ## 招式实现见 boss_brain.gd。trophy 可以没有（小 Boss 只掉道具）。
 ## break 是连冲 charge2 蓄力时能吃的霰弹击退总量（不打 knock_res 的折扣），攒够就被打断并硬直。
+## once 里的招式每个阶段只放一次。下面几项是各 Boss 的专属机制，见 boss_brain.gd：
+## hit_floor 覆甲阈值（单次伤害低于它只结算 floor_mult，阶段 bare 取消）；
+## regen 每秒回复的最大生命比例（挂冰或着火时停）；burrow 钻地秒数范围；reflect 正面反弹子弹。
 const BOSSES := {
 	"vanguard": {
 		"title": "裂颚先锋", "warn": "红色通道是冲撞路线，红圈是重砸，侧向闪开", "drops": ["armor", "ammo_crate"], "slam_scale": 0.9,
@@ -260,6 +295,17 @@ const BOSSES := {
 				"enter": "call", "call": ["runner", "runner", "exploder"], "break": 300.0, "moves": ["charge2", "slam", "rocks", "call"]},
 		],
 	},
+	"colossus": {
+		"title": "覆甲巨像", "warn": "小伤害打在甲上只剩一成，换霰弹、狙击、榴弹或回旋镖", "trophy": "plating",
+		"drops": ["sticky", "ammo_crate", "armor"], "shield": 0.16, "slam_scale": 1.2, "hit_floor": 16.0, "floor_mult": 0.1,
+		"phases": [
+			{"at": 1.0, "name": "外壳", "sub": "", "speed": 1.0, "gap": [2.0, 2.8], "rocks": 3, "moves": ["rocks", "slam", "charge"]},
+			{"at": 0.6, "name": "裂甲", "sub": "甲裂开了，先用榴弹、火或电打破护盾", "speed": 1.0, "gap": [1.6, 2.4], "rocks": 3, "tint": "#e0d0c0",
+				"enter": "shield", "call": ["tank"], "moves": ["rocks", "slam", "call"]},
+			{"at": 0.3, "name": "裸核", "sub": "装甲脱落，什么枪都打得动了", "speed": 1.4, "gap": [1.2, 1.8], "tint": "#ffb090", "bare": true,
+				"moves": ["charge2", "wave", "slam"]},
+		],
+	},
 	"plague": {
 		"title": "瘟疫母体", "warn": "毒雾会缓慢掉血，离开绿圈", "trophy": "serum", "drops": ["medkit", "inf_ammo", "armor"], "shield": 0.16,
 		"phases": [
@@ -269,11 +315,46 @@ const BOSSES := {
 				"enter": "shield", "call": ["splitter", "spitter", "screamer"], "moves": ["fogring", "fog", "fan", "shield", "call"]},
 		],
 	},
+	"graveborn": {
+		"title": "再生坟主", "warn": "不挂冰也不着火时它一直回血，先用冰或火压住", "trophy": "ash",
+		"drops": ["ammo_crate", "medkit"], "shield": 0.1, "regen": 0.025,
+		"phases": [
+			{"at": 1.0, "name": "腐土", "sub": "", "speed": 1.0, "gap": [2.0, 2.8], "rocks": 3, "call": ["walker", "walker", "walker"],
+				"moves": ["call", "rocks", "slam"]},
+			{"at": 0.55, "name": "冻土·焦土", "sub": "维持冰或火，别让它回血", "speed": 1.0, "gap": [1.5, 2.2], "tint": "#c8e0b0",
+				"enter": "shield", "moves": ["fogring", "fan", "shield"]},
+			{"at": 0.25, "name": "崩坟", "sub": "再生更快了，冰火别断，一口气打完", "speed": 1.15, "gap": [1.2, 1.8], "tint": "#b0d890", "regen": 0.04,
+				"call": ["walker", "walker", "runner"], "moves": ["wave", "storm", "call"]},
+		],
+	},
+	"burrowlord": {
+		"title": "掘地领主", "warn": "黄圈和土堆是它在地下，子弹打不到；用爆炸、火或闪光逼它出土", "trophy": "soil",
+		"drops": ["frag", "ammo_crate", "armor"], "slam_scale": 1.1, "burrow": [2.5, 4.0],
+		"phases": [
+			{"at": 1.0, "name": "潜伏", "sub": "", "speed": 1.0, "gap": [2.2, 3.0], "rocks": 2, "moves": ["burrow", "emerge_slam", "rocks"]},
+			{"at": 0.6, "name": "地裂", "sub": "冲击波贴地扫来，冲刺能穿过去", "speed": 1.1, "gap": [1.6, 2.3], "tint": "#e8d0a0",
+				"moves": ["wave", "storm", "burrow"]},
+			{"at": 0.3, "name": "塌方", "sub": "钻地更频繁，还叫来了潜伏者", "speed": 1.2, "gap": [1.2, 1.8], "tint": "#ffc080",
+				"enter": "call", "call": ["stalker", "stalker"], "burrow": [1.4, 2.2], "moves": ["burrow", "emerge_slam", "storm"]},
+		],
+	},
+	"mirror": {
+		"title": "镜面女皇", "warn": "正面的子弹和狙击会被弹回来，绕后或用榴弹、电弧、火焰", "trophy": "shard",
+		"drops": ["armor", "ammo_crate", "frag"], "shield": 0.12, "reflect": true,
+		"phases": [
+			{"at": 1.0, "name": "镜面", "sub": "", "speed": 1.0, "gap": [1.9, 2.7], "rocks": 4, "moves": ["fan", "rocks", "slam"]},
+			{"at": 0.55, "name": "裂镜", "sub": "先清护盾兵，再用爆炸破盾", "speed": 1.0, "gap": [1.5, 2.2], "tint": "#d8d0ff",
+				"enter": "shield", "call": ["shielder"], "moves": ["shield", "fog", "call", "wave"]},
+			{"at": 0.25, "name": "万镜", "sub": "红环亮起时任何直射都会弹回，只打范围伤害", "speed": 1.1, "gap": [1.2, 1.7], "tint": "#ffb0d0",
+				"moves": ["reflect_aura", "fan", "wave"]},
+		],
+	},
 	"overlord": {
 		"title": "尸王", "warn": "这是最后一战，它会用尽所有手段", "trophy": "crown", "final": true, "drops": ["nuke", "damage", "armor"], "shield": 0.1, "slam_scale": 1.25,
 		"elites": ["stalker", "shielder", "splitter", "summoner", "screamer", "balloon"],
 		"phases": [
-			{"at": 1.0, "name": "围城", "sub": "", "speed": 1.0, "gap": [2.0, 3.0], "rocks": 5, "moves": ["charge", "slam", "rocks"]},
+			# 开局就会张一次薄盾，逼玩家早点掏出榴弹、火和电
+			{"at": 1.0, "name": "围城", "sub": "", "speed": 1.0, "gap": [2.0, 3.0], "rocks": 5, "once": ["shield"], "moves": ["charge", "slam", "rocks", "shield"]},
 			{"at": 0.75, "name": "亡者号令", "sub": "精英活着时本体大幅减伤，先清精英", "speed": 1.0, "gap": [1.9, 2.8], "rocks": 5, "guard": 0.4, "tint": "#d8c0ff",
 				"enter": "elites", "moves": ["elites", "charge", "rocks", "wave"]},
 			{"at": 0.5, "name": "瘟疫之息", "sub": "毒雾、护盾和全场尖叫", "speed": 1.1, "gap": [1.6, 2.3], "tint": "#d0ffb0",
@@ -369,22 +450,23 @@ const VANGUARD_COUNT := 6
 const VANGUARD_EXTRA_TIME := 3.0
 
 ## 手工设计的 15 波节奏：偶数波打 Boss，奇数波是普通波，第 15 波尸王终局；第 8、12 波是特殊波。
-## 一期只有裂颚先锋（2）、屠夫（4）、瘟疫母体（8）和尸王（15），6、10、12、14 波先用高压普通波占位。
+## 八道 Boss：裂颚先锋 2、屠夫 4、覆甲巨像 6、瘟疫母体 8（酸雨）、再生坟主 10、掘地领主 12（断电）、镜面女皇 14、尸王 15。
 const WAVES := [
 	{"name": "先头部队", "walker": 10},
 	{"name": "裂颚先锋", "walker": 6, "runner": 2, "vanguard": 1, "hint": "红色通道是冲撞路线，红圈是重砸，看到就侧向闪开"},
 	{"name": "毒液来袭", "walker": 12, "runner": 4, "spitter": 3},
 	{"name": "屠夫现身", "walker": 6, "runner": 4, "exploder": 1, "boss": 1},
 	{"name": "会爆炸的家伙", "walker": 13, "runner": 5, "spitter": 2, "exploder": 4, "splitter": 2},
-	{"name": "暗处的眼睛", "walker": 10, "runner": 16, "exploder": 2, "stalker": 4},  # TODO(Phase2)：换成覆甲巨像
+	{"name": "覆甲巨像", "walker": 8, "runner": 4, "tank": 1, "colossus": 1, "hint": "小伤害几乎打不动它，换成霰弹、狙击、榴弹或回旋镖"},
 	{"name": "铁壁", "walker": 14, "runner": 7, "spitter": 3, "tank": 2, "shielder": 3},
 	{"name": "瘟疫酸雨", "walker": 12, "runner": 6, "spitter": 4, "exploder": 2, "splitter": 3, "plague": 1, "special": "acid_rain", "hint": "酸雨里瘟疫母体来了：红圈落酸液，绿圈是毒雾"},
 	{"name": "火药桶", "walker": 14, "runner": 10, "exploder": 10, "tank": 2, "summoner": 2},
-	{"name": "坟场躁动", "walker": 20, "runner": 12, "spitter": 4, "exploder": 4, "tank": 2, "splitter": 3, "screamer": 2},  # TODO(Phase2)：换成再生坟主
+	{"name": "再生坟主", "walker": 12, "runner": 6, "spitter": 2, "exploder": 2, "graveborn": 1, "hint": "先挂上冰或火压住再生，再集火"},
 	{"name": "黑夜降临", "walker": 28, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "screamer": 3, "balloon": 2},
-	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 10, "special": "blackout", "hint": "全城断电，潜伏者最爱这种夜晚"},  # TODO(Phase3)：加掘地领主
+	{"name": "断电之夜", "walker": 18, "runner": 12, "spitter": 5, "exploder": 5, "tank": 4, "shielder": 4, "stalker": 6, "burrowlord": 1, "special": "blackout",
+		"hint": "土堆和黄圈是掘地领主，断电时更难发现——用榴弹、火或闪光逼它出土"},
 	{"name": "尸潮", "walker": 38, "runner": 23, "spitter": 6, "exploder": 7, "tank": 4, "splitter": 4, "balloon": 4, "screamer": 2},
-	{"name": "绝望之墙", "walker": 24, "runner": 18, "spitter": 8, "exploder": 8, "tank": 6, "shielder": 8, "summoner": 3, "screamer": 3, "balloon": 3},  # TODO(Phase3)：换成镜面女皇
+	{"name": "镜面女皇", "walker": 14, "runner": 10, "spitter": 4, "exploder": 4, "mirror": 1, "hint": "别正面点射，绕后或用榴弹、电弧、火焰"},
 	{"name": "最终围城", "walker": 22, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "shielder": 3, "stalker": 3, "overlord": 1},
 ]
 

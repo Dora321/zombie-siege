@@ -36,6 +36,11 @@ var dash_dir := Vector2.RIGHT
 var invuln := 0.0
 ## 持续伤害系数，母体血清减半。
 var dot_mult := 1.0
+# 后四个 Boss 的战利品：粘弹伤害、冰火持续、爆炸打 Boss、镜面反弹伤害
+var sticky_mult := 1.0
+var status_bonus := 0.0
+var blast_boss_mult := 1.0
+var reflect_mult := 1.0
 var recoil_px := 0.0
 var fired_kick := 0.0
 
@@ -554,6 +559,14 @@ func apply_trophy(id: String) -> void:
 			dot_mult = GameData.TROPHY_DOT
 		"crown":
 			game.score += GameData.TROPHY_SCORE
+		"plating":
+			sticky_mult = GameData.TROPHY_STICKY
+		"ash":
+			status_bonus = GameData.TROPHY_STATUS_TIME
+		"soil":
+			blast_boss_mult = GameData.TROPHY_BLAST_BOSS
+		"shard":
+			reflect_mult = GameData.TROPHY_REFLECT
 
 
 func heal(amount: float) -> void:

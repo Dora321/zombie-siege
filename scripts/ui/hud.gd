@@ -169,6 +169,9 @@ func _draw_boss_bar(boss: Variant) -> void:
 	if shield > 0.0:
 		draw_rect(Rect2(rect.position, Vector2(roundf(rect.size.x * shield), 2)), Color("#b0ff70"))
 	var label := "%s  第 %d/%d 阶段：%s" % [info["title"], int(info["phase"]) + 1, int(info["count"]), info["name"]]
+	# 专属机制的状态：在地下、再生中、反弹光环
+	if String(info.get("status", "")) != "":
+		label += "  [%s]" % info["status"]
 	var col := Color("#b0ff70") if shield > 0.0 else (Color("#d8c0ff") if boss._brain.guarded() else Color("#ff9070"))
 	Art.draw_text(self, label, Vector2(W * 0.5, 37), 12, col, 1)
 
