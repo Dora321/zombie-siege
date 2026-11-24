@@ -381,6 +381,14 @@ func _buy(mod_id: String) -> void:
 	else:
 		game.set("coins", _balance() - cost)
 	_finish_transaction()
+	if not Harness.automated():
+		Save.career["mods_bought"] = int(Save.career.get("mods_bought", 0)) + 1
+		var equipped := _read_mods(player, _weapon_id)
+		var all_slots_filled := WeaponMods.SLOT_ORDER.all(func(slot: String) -> bool:
+			return not String(equipped[slot]).is_empty())
+		# 首次解锁时会一并保存这次购买的计数。
+		if not all_slots_filled or not Save.unlock_achievement("gunsmith"):
+			Save.save_all()
 
 
 func _sell() -> void:
