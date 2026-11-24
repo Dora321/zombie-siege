@@ -188,6 +188,10 @@ func _physics_process(dt: float) -> void:
 		return
 	if _brain != null:
 		_brain.tick(self, dt)
+	if is_boss and _brain.expose_t > 0.0 and not _brain.untouchable():
+		_animate(dt, Vector2.ZERO, 0.0)
+		queue_redraw()
+		return
 	if _frozen_t > 0.0 or _stun_t > 0.0:
 		# 冻住和眩晕时站着不动，只吃击退
 		_move_by(_knock * dt)
@@ -254,6 +258,10 @@ func blocks_shot(dir: Vector2) -> bool:
 ## 镜面女皇：这一发直射有没有被弹回去。src 同 take_damage。
 func reflect_shot(dir: Vector2, damage: float, src: String, from_player: bool) -> bool:
 	return _brain != null and not dead and _brain.reflect_shot(self, dir, damage, src, from_player)
+
+
+func counter_boss_cast(element: String) -> bool:
+	return is_boss and not dead and _brain.counter_cast(self, element)
 
 
 func shield_hit(amount: float) -> void:
@@ -552,6 +560,9 @@ func vulnerability() -> float:
 func apply_chill(amount: float) -> void:
 	if dead:
 		return
+	counter_boss_cast("ice")
+	if dead:
+		return
 	# 先燃后冻：冰把火浇灭的这一下淬火
 	var was_burning := _burn_t > 0.0
 	_burn_t = 0.0
@@ -598,13 +609,19 @@ func stun(seconds: float) -> void:
 		return
 	_stun_t = maxf(_stun_t, seconds)
 	_windup = -1.0
-	if _charge_t > 0.0:
+	var charging := _charge_t > 0.0
+	if charging:
 		_end_charge()
-	if _brain != null:
+	if is_boss:
+		_brain.on_stun(self, charging)
+	elif _brain != null:
 		_brain.on_stun(self)
 
 
 func ignite(seconds: float, blue := false) -> void:
+	if dead:
+		return
+	counter_boss_cast("fire")
 	if dead:
 		return
 	var duration := seconds + _status_bonus()
@@ -705,16 +722,21 @@ func _tick_regen(dt: float) -> void:
 
 ## 子弹、爆炸都走这里。src 标明伤害来源（bullet/buckshot/beam/arc/rang/blast/nuke），
 ## Boss 的覆甲、钻地要看它；蓝焰用 blue_flame，脚本直接扣血留空。
-func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "") -> void:
+func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "", element := "") -> void:
 	if dead:
 		return
+	if src == "blast" and amount > 0.0:
+		counter_boss_cast(element if element != "" else "blast")
+		if dead:
+			return
 	var frozen := _frozen_t > 0.0
 	_calm_t = GameData.REGEN_DELAY
-	amount *= vulnerability()
+	if src != "orb_backlash":
+		amount *= vulnerability()
 	var shatter := frozen and (src == "buckshot" or src == "beam")
 	if shatter:
 		amount *= 1.0 + GameData.SHATTER_BONUS
-	if amount >= KILL_DAMAGE:
+	if amount >= KILL_DAMAGE and src != "orb_backlash":
 		overkill = true
 		no_blast = true
 	elif _brain != null:
@@ -729,7 +751,8 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true,
 	hp -= amount
 	_flash_t = 0.07
 	_stagger_t = 0.1
-	_knock += dir * knock * (1.0 - _knock_res)
+	if not is_boss or _brain.expose_t <= 0.0:
+		_knock += dir * knock * (1.0 - _knock_res)
 	var hit_pos := center()
 	game.fx.blood_hit(hit_pos, dir, 3 + int(amount * 0.2), Color(String(_stat["blood"])))
 	if show_number:

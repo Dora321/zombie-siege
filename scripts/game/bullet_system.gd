@@ -130,10 +130,31 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 		if closest.distance_squared_to(c) <= r * r and t < best_t:
 			best_t = t
 			best = z
+	var orb_hit: Dictionary = game.hazards.orb_on_segment(b.pos, end, 6.0, b.hits)
+	if not orb_hit.is_empty() and float(orb_hit["t"]) <= best_t:
+		var element := "ice" if b.chill > 0.0 else ("fire" if b.burn else "normal")
+		var orb: Variant = orb_hit["orb"]
+		if game.hazards.damage_orb(orb, b.damage, element):
+			b.hits.append(orb)
+			if b.from_player:
+				shots_hit += 1
+			game.on_bullet_hit()
+			b.pierce -= 1
+			if b.pierce < 0:
+				return false
 	if best != null:
+		# 球体反噬可能已经击败这个 Boss。
+		if best.dead:
+			b.pos = end
+			return true
 		var dir := b.vel.normalized()
 		var damage: float = b.damage
 		var src := "buckshot" if b.buckshot else "bullet"
+		# 元素弹能打断反向蓄力，包括镜面女皇的正面。
+		if b.chill > 0.0 or b.burn:
+			best.counter_boss_cast("ice" if b.chill > 0.0 else "fire")
+			if best.dead:
+				return false
 		# 镜面女皇正面：子弹被弹回去
 		if best.reflect_shot(dir, damage, src, b.from_player):
 			return false

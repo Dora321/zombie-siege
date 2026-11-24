@@ -20,7 +20,27 @@ const MOVE_WARN := {
 	"charge": CHARGE_WARN, "charge2": CHARGE_WARN, "slam": 0.9, "rocks": 0.55, "storm": 0.7, "fog": 0.6,
 	"fogring": 0.7, "fan": 0.6, "wave": 0.9, "call": 0.8, "elites": 1.0, "shield": 0.7, "scream": 0.9,
 	"burrow": 0.5, "emerge_slam": 0.7, "reflect_aura": 1.0,
+	"fire_orb": 1.35, "ice_orb": 1.35, "car_toss": 1.2, "bungee": 1.0,
 }
+const SIGNATURE_MOVES := {
+	"boss": ["car_toss"], "colossus": ["car_toss"], "plague": ["bungee"], "graveborn": ["ice_orb"],
+	"burrowlord": ["bungee"], "mirror": ["fire_orb"], "overlord": ["bungee", "car_toss"],
+}
+const SIGNATURE_LINES := {
+	"fire_orb": "巨型火球！冰可熄灭", "ice_orb": "巨型冰球！火可融化",
+	"car_toss": "接住这辆废车！", "bungee": "蹦极尸群，空降！",
+}
+const BANTER := {
+	"vanguard": ["让我先咬一口！", "再来一轮！"],
+	"boss": ["今晚开席！", "我还没切够！"],
+	"colossus": ["听见铁甲的声音了吗？", "裂了就裂了！"],
+	"plague": ["孢子闻到活人了！", "再靠近一点！"],
+	"graveborn": ["谁在踩我的墓？", "坟土还没凉呢！"],
+	"burrowlord": ["小心你的脚下！", "地底还有动静！"],
+	"mirror": ["看看你身后！", "每道裂缝都是一面镜子！"],
+	"overlord": ["这座城归我了！", "听令，亡者！", "冰与火，听我号令！", "王冠是我的！"],
+}
+const EXPOSE_COLOR := Color("#ffe060")
 ## 覆甲阈值不管这些来源：爆炸、狙击、回旋镖、霰弹、蓝焰、核弹、脚本直接扣血。
 const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "saw", "buckshot", "blue_flame", "nuke", ""]
 ## 钻在地下时，这些直射打不到它（子弹从土堆上飞过去）。
@@ -56,6 +76,7 @@ var changing_t := 0.0
 var shield := 0.0
 var shield_max := 1.0
 var moves_used := {}
+var expose_t := 0.0
 
 var _gap := 2.2
 var _act := ""
@@ -76,6 +97,7 @@ var _clock := 0.0
 var _notes := {}
 var _text_t := 0.0
 var _counter_tip_shown := false
+var _orb_dir := Vector2.DOWN
 # 再生
 var _regen_shown := 0.0
 var _regen_state := ""
@@ -95,6 +117,7 @@ func setup(z: Variant) -> void:
 	spec = GameData.BOSSES[z.kind]
 	phases = spec["phases"]
 	_apply_phase(z)
+	_banter(z)
 
 
 func info(z: Variant = null) -> Dictionary:
@@ -103,6 +126,8 @@ func info(z: Variant = null) -> Dictionary:
 
 ## 血条旁边的状态字：地下、淬火、再生、反弹。
 func status(z: Variant = null) -> String:
+	if expose_t > 0.0:
+		return "破防！易伤×1.8"
 	if underground():
 		return "在地下"
 	if z != null and z.quenched() and has_armor(z):
@@ -155,11 +180,19 @@ func _note(key: String, text: String) -> void:
 	Harness.note(text)
 
 
-func _say(z: Variant, text: String, color: Color) -> void:
-	if _text_t > 0.0:
+func _say(z: Variant, text: String, color: Color, force := false) -> void:
+	if _text_t > 0.0 and not force:
 		return
 	_text_t = 1.2
 	z.game.fx.text(z.position + Vector2(0, -z.center_h * 2.0 - 8.0), text, color)
+
+
+func _banter(z: Variant) -> void:
+	if Harness.automated():
+		return
+	var lines: Array = BANTER.get(z.kind, [])
+	if not lines.is_empty():
+		_say(z, String(lines[mini(phase, lines.size() - 1)]), Color("#ffd0a0"))
 
 
 func _counter_tip(z: Variant, ready: bool, title: String, sub: String, color: Color) -> void:
@@ -174,7 +207,6 @@ func _apply_phase(z: Variant) -> void:
 	z._speed_mult = float(p.get("speed", 1.0))
 	z.set_tint(Color(String(p.get("tint", "#ffffff"))))
 	_guard = 1.0
-	_enter = String(p.get("enter", ""))
 
 
 ## src 是伤害来源，脚本直接扣血是空串。
@@ -185,8 +217,13 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 		if DIRECT.has(src):
 			return 0.0
 		_force_out(z, {"blast": "爆炸", "tick": "火焰", "blue_flame": "火焰"}.get(src, "重击"))
+	# 反噬固定扣最大生命值的 6%，仍走同一套阶段锁。
+	if src == "orb_backlash":
+		return _phase_damage(z, amount)
+	if expose_t > 0.0:
+		amount *= 1.8
 	# 覆甲：小伤害只结算一成。先看原始伤害，护盾照常全额吃
-	var light := _armored(z) and not FLOOR_EXEMPT.has(src) and amount < float(spec["hit_floor"])
+	var light := expose_t <= 0.0 and _armored(z) and not FLOOR_EXEMPT.has(src) and amount < float(spec["hit_floor"])
 	if shield > 0.0:
 		var soaked := minf(shield, amount)
 		shield -= soaked
@@ -204,7 +241,10 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 		z.cue("叮", z.CUE_DING)
 		_note("floor", "%s 的装甲挡下小伤害（累计 %d 次，来源 %s）" % [spec["title"], int(stats["floor"]), src])
 		_counter_tip(z, int(stats["floor"]) >= 6, "厚甲弹开！", "换霰弹、狙击、爆炸或蓝焰熔炉破甲", Color("#ffd080"))
-	amount *= _guard
+	return _phase_damage(z, amount * _guard)
+
+
+func _phase_damage(z: Variant, amount: float) -> float:
 	if phase + 1 < phases.size():
 		var floor_hp: float = float(phases[phase + 1]["at"]) * z.max_hp
 		if z.hp - amount <= floor_hp:
@@ -238,17 +278,63 @@ func _begin_change(z: Variant) -> void:
 	z._pose = -1
 	shield = 0.0
 	_apply_phase(z)
+	_enter = String(phases[phase].get("enter", ""))
 	z.flash_warn(CHANGE_T)
 	z.game.on_boss_phase(z, phases[phase], phase, phases.size())
+	_banter(z)
 
 
-func on_stun(z: Variant) -> void:
+func trigger_expose(z: Node2D, seconds := 3.0, reason := "破防！") -> void:
+	if z.dead:
+		return
+	var fresh := expose_t <= 0.0
+	expose_t = maxf(expose_t, seconds)
+	_surface(z)
+	_act = ""
+	_chain = 0
+	_breakable = false
+	aura_t = 0.0
+	_drop_lane(z)
+	z.game.hazards.cancel_cast(z)
+	z._end_charge()
+	z._pose = -1
+	if changing_t <= 0.0:
+		z._warn_t = 0.0
+	z._knock = Vector2.ZERO
+	z.game.fx.ring(z.center(), z.hit_r + 16.0, 0.4, EXPOSE_COLOR)
+	z.game.fx.spark(z.center())
+	if fresh:
+		_count("exposed")
+		if not Harness.automated():
+			_say(z, reason + "全力输出！", EXPOSE_COLOR, true)
+		_note("exposed", "%s %s" % [spec["title"], reason])
+
+
+func counter_backlash(z: Variant) -> void:
+	z.take_damage(z.max_hp * 0.06, Vector2.ZERO, 0.0, true, "orb_backlash")
+	if not z.dead:
+		trigger_expose(z, 3.0, "冰火反制破防！")
+
+
+func counter_cast(z: Variant, element: String) -> bool:
+	if not ((_act == "fire_orb" and element == "ice") or
+			(_act == "ice_orb" and (element == "fire" or element == "blast"))):
+		return false
+	Sfx.play("shield_break")
+	_count("orb_cancel")
+	counter_backlash(z)
+	return true
+
+
+func on_stun(z: Variant, charging := false) -> void:
 	if underground():
 		_force_out(z, "闪光")
 		return
 	# 被晕打断蓄力，闪光弹是正经的反制手段
 	if _breakable and _act != "":
 		_interrupt(z, "闪光")
+	elif charging or _act == "charge" or _act == "charge2" or SIGNATURE_LINES.has(_act):
+		trigger_expose(z, 2.0, "打断破防！")
 	_act = ""
 	_chain = 0
 	z._pose = -1
@@ -266,9 +352,8 @@ func on_buckshot(z: Variant, knock: float) -> void:
 
 
 func _interrupt(z: Variant, by: String) -> void:
-	_breakable = false
+	trigger_expose(z, 2.0, "打断破防！")
 	z._stun_t = maxf(z._stun_t, BREAK_STUN)
-	z.game.fx.text(z.position + Vector2(0, -z.center_h * 2.0 - 8.0), "打断！", Color("#ffe060"))
 	Sfx.play("shield_break", 0.0)
 	Harness.note("%s 的连冲被%s打断（第 %d 阶段）" % [spec["title"], by, phase + 1])
 
@@ -295,6 +380,13 @@ func tick(z: Variant, dt: float) -> void:
 	_clock += dt
 	_text_t -= dt
 	aura_t -= dt
+	if changing_t <= 0.0:
+		expose_t = maxf(expose_t - dt, 0.0)
+	# 号令护甲：叫来的精英还活着，本体就很难打动。
+	if phases[phase].has("guard"):
+		_guard = float(phases[phase]["guard"]) if _minions(z) > 0 else 1.0
+	var flash := expose_t > 0.0 and int(_clock * 12.0) % 2 == 0
+	z.body.self_modulate = Color(1.7, 0.95, 0.35) if flash else Color.WHITE
 	_tick_regen(z, dt)
 	if underground():
 		_counter_tip(z, _clock - _burrow_start > 2.2 and not stats.has("forced_out"),
@@ -325,7 +417,7 @@ func _tick_regen(z: Variant, dt: float) -> void:
 		return
 	_regen_state = "on"
 	var cap: float = float(phases[phase]["at"]) * z.max_hp
-	if changing_t > 0.0 or z.hp >= cap:
+	if changing_t > 0.0 or expose_t > 0.0 or z.hp >= cap:
 		return
 	var gain: float = minf(rate * z.max_hp * dt, cap - z.hp)
 	z.hp += gain
@@ -341,7 +433,7 @@ func _tick_regen(z: Variant, dt: float) -> void:
 
 ## 镜面女皇：正面的子弹和狙击弹回去，反射光环期间连背后的直射也弹。返回 true 表示这一发被弹掉了。
 func reflect_shot(z: Variant, dir: Vector2, damage: float, src: String, from_player: bool) -> bool:
-	if not bool(spec.get("reflect", false)) or changing_t > 0.0 or z.incapacitated() or not DIRECT.has(src) or src == "arc" or src == "saw":
+	if not bool(spec.get("reflect", false)) or changing_t > 0.0 or expose_t > 0.0 or z.incapacitated() or not DIRECT.has(src) or src == "arc" or src == "saw":
 		return false
 	var aura := aura_t > 0.0
 	if not aura and (src == "rang" or dir.dot(face) >= MIRROR_FRONT):
@@ -417,8 +509,13 @@ func decide(z: Variant, dt: float, player_ok: bool) -> Variant:
 	if changing_t > 0.0:
 		changing_t -= dt
 		z._lunge = Vector2(randf_range(-1.5, 1.5), randf_range(-1.0, 1.0))
-		if changing_t <= 0.0 and _enter != "":
-			_begin_move(z, _enter)
+		return Vector2.ZERO
+	if expose_t > 0.0:
+		return Vector2.ZERO
+	if _enter != "":
+		var enter := _enter
+		_enter = ""
+		_begin_move(z, enter)
 		return Vector2.ZERO
 	if underground():
 		_burrow_t -= dt
@@ -434,9 +531,6 @@ func decide(z: Variant, dt: float, player_ok: bool) -> Variant:
 			return Vector2.ZERO
 		z._speed_mult = float(phases[phase].get("speed", 1.0)) * BURROW_SPEED
 		return dir
-	# 号令护甲：叫来的精英还活着，本体就很难打动
-	if phases[phase].has("guard"):
-		_guard = float(phases[phase]["guard"]) if _minions(z) > 0 else 1.0
 	if z._charge_t > 0.0:
 		z._charge_t -= dt
 		if z._charge_t <= 0.0 or z._charge_impact(player_ok):
@@ -490,6 +584,19 @@ func _pick(z: Variant, player_ok: bool) -> String:
 	for m: String in moves:
 		if _can_use(z, m, d):
 			options.append(m)
+	if phase >= 1:
+		var signatures: Array = SIGNATURE_MOVES.get(z.kind, [])
+		if z.kind == "overlord" and phase >= 2:
+			signatures = ["ice_orb", "fire_orb"] + signatures
+		var debut := ""
+		for m: String in signatures:
+			if _can_use(z, m, d):
+				options.append(m)
+				if debut == "" and not moves_used.has(m):
+					debut = m
+		# 常规招式后，优先展示本场还没用过的招牌招式。
+		if debut != "" and not SIGNATURE_LINES.has(_last):
+			return debut
 	if options.size() > 1:
 		options.erase(_last)
 	if options.is_empty():
@@ -525,6 +632,12 @@ func _can_use(z: Variant, move: String, d: float) -> bool:
 			return d < SLAM_REACH
 		"reflect_aura":
 			return d < AURA_REACH and aura_t <= 0.0
+		"fire_orb", "ice_orb":
+			return z.position.distance_to(_orb_target(z, move)) <= 300.0
+		"car_toss":
+			return d <= ROCK_REACH or z.position.distance_to(z.game.base.position) <= ROCK_REACH
+		"bungee":
+			return _minions(z) <= MINION_CAP - 2 and z.game.zombies.size() < z.game.MAX_ALIVE
 	return false
 
 
@@ -542,7 +655,16 @@ func _begin_move(z: Variant, move: String, follow := false) -> void:
 	z.flash_warn(warn)
 	z._pose = 2
 	var hazards: Variant = z.game.hazards
+	if SIGNATURE_LINES.has(move):
+		if not Harness.automated():
+			_say(z, String(SIGNATURE_LINES[move]), Color("#a8f4ff") if move == "ice_orb" else Color("#ffe080"))
+		_note(move, "%s：%s" % [spec["title"], SIGNATURE_LINES[move]])
 	match move:
+		"fire_orb", "ice_orb":
+			_orb_dir = z.position.direction_to(_orb_target(z, move))
+			if _orb_dir == Vector2.ZERO:
+				_orb_dir = face
+			Sfx.play("cryo" if move == "ice_orb" else "charge_warn", -3.0)
 		"charge", "charge2":
 			if move == "charge2":
 				_chain = 1
@@ -582,9 +704,33 @@ func _begin_move(z: Variant, move: String, follow := false) -> void:
 
 func _aim_point(z: Variant) -> Vector2:
 	var player: Variant = z.game.player
-	if player.alive and z.position.distance_to(player.position) < ROCK_REACH:
+	if player != null and player.alive and z.position.distance_to(player.position) < ROCK_REACH:
 		return player.position
 	return z.game.base.position + Vector2(0, -8)
+
+
+func _orb_target(z: Variant, move: String) -> Vector2:
+	var player: Variant = z.game.player
+	if player != null and player.alive and z.position.distance_to(player.position) <= 300.0:
+		return player.position
+	var target: Vector2 = z.game.base.position + Vector2(0, -8)
+	return _crowded_turret_point(z, target, 1) if move == "ice_orb" else target
+
+
+func _crowded_turret_point(z: Variant, fallback: Vector2, minimum: int) -> Vector2:
+	var target := fallback
+	var best := minimum - 1
+	for turret: Variant in z.game.turrets:
+		if not turret.alive or z.position.distance_to(turret.position) > ROCK_REACH:
+			continue
+		var count := 0
+		for neighbor: Variant in z.game.turrets:
+			if neighbor.alive and turret.position.distance_to(neighbor.position) < 30.0:
+				count += 1
+		if count > best:
+			best = count
+			target = turret.position
+	return target
 
 
 func _fire_move(z: Variant, move: String, player_ok: bool) -> void:
@@ -592,6 +738,21 @@ func _fire_move(z: Variant, move: String, player_ok: bool) -> void:
 	var hazards: Variant = game.hazards
 	var aim := _aim_point(z)
 	match move:
+		"fire_orb", "ice_orb":
+			var start: Vector2 = z.position + _orb_dir * (z.hit_r + 4.0)
+			hazards.spawn_orb(move, start, _orb_dir, 64.0 + phase * 12.0, z._damage * 1.15, z)
+			Sfx.play("throw")
+		"car_toss":
+			var target := _crowded_turret_point(z, aim, 2)
+			hazards.drop_car(target, 1.5, z._damage * 1.7, z)
+			Sfx.play("throw")
+		"bungee":
+			var count := mini(3 if phase >= 2 else 2, MINION_CAP - _minions(z))
+			var kinds := ["runner", "exploder", "shielder"]
+			for i in count:
+				var at := aim + Vector2.from_angle(z.position.angle_to_point(aim) + i * TAU / count) * 29.0
+				hazards.bungee_drop(at, 1.6, kinds[(i + phase - 1) % kinds.size()], z)
+			Sfx.play("summon")
 		"charge", "charge2":
 			z._charge_t = CHARGE_T
 			Sfx.play("boss_roar", -1.0)
@@ -671,8 +832,17 @@ func draw(z: Variant) -> void:
 	if underground():
 		_draw_mound(z)
 		return
-	if bool(spec.get("reflect", false)):
+	if expose_t > 0.0:
+		var pulse := sin(_clock * 15.0) * 0.5 + 0.5
+		z.draw_circle(mid, r + 2.0, Color(1.0, 0.28, 0.1, 0.18 + pulse * 0.2))
+		z.draw_arc(mid, r + pulse * 3.0, 0.0, TAU, 28, EXPOSE_COLOR, 2.0)
+		z.draw_rect(Rect2(mid - Vector2(2, 2), Vector2(4, 4)), EXPOSE_COLOR)
+	elif bool(spec.get("reflect", false)):
 		_draw_mirror(z, mid)
+	if _act == "fire_orb" or _act == "ice_orb":
+		var at: Vector2 = mid + _orb_dir * (z.hit_r + 8.0)
+		var progress := 1.0 - _act_t / float(MOVE_WARN[_act])
+		z.game.hazards.draw_element_orb(z, at.round(), lerpf(5.0, 13.0, progress), _act, _clock * 8.0)
 	if z.quenched() and has_armor(z):
 		# 淬火：甲缝里往外冒白汽
 		var k := int(Time.get_ticks_msec() / 90) % 8

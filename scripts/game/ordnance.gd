@@ -22,6 +22,7 @@ const STUN_TANK := 0.6
 const STUN_BOSS := 0.3
 const RANG_LIFE := 6.0
 const SHIELD_PIERCE := 0.5
+const Hazards := preload("res://scripts/game/hazards.gd")
 
 class Lob:
 	var from: Vector2
@@ -133,9 +134,23 @@ func beam(from: Vector2, dir: Vector2, length: float, damage: float, knock: floa
 		var r: float = z.hit_r
 		if (from + dir * along).distance_squared_to(c) <= r * r:
 			hit_list.append({"z": z, "d": along})
+	var orbs_seen: Array = []
+	while true:
+		var orb_hit: Dictionary = game.hazards.orb_on_segment(from, to, 0.0, orbs_seen)
+		if orb_hit.is_empty():
+			break
+		orbs_seen.append(orb_hit["orb"])
+		hit_list.append({"orb": orb_hit["orb"], "d": float(orb_hit["t"]) * length})
 	hit_list.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]))
 	for i in mini(hit_list.size(), pierce + 1):
+		if hit_list[i].has("orb"):
+			if game.hazards.damage_orb(hit_list[i]["orb"], damage, "normal"):
+				game.bullets.shots_hit += 1
+				game.on_bullet_hit()
+			continue
 		var z: Variant = hit_list[i]["z"]
+		if z.dead:
+			continue
 		var at: Vector2 = z.center()
 		# 镜面女皇正面：光束被弹回去，后面的也打不到了
 		if z.reflect_shot(dir, damage, "beam", true):
@@ -195,7 +210,7 @@ func _flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage:
 	var ground: Vector2 = from + GROUND_OFFSET
 	var cone_slope := tan(cone)
 	var src := "blue_flame" if blue else "tick"
-	var hit_any := false
+	var hit_any: bool = game.hazards.hit_orb(from + dir * length * 0.5, length * 0.55, damage * 2.5, "fire")
 	for z: Variant in game.zombies_near(from, length + 16.0):
 		if z.dead:
 			continue
@@ -209,6 +224,7 @@ func _flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage:
 			continue
 		if not map.line_clear(ground, z.position, map.BLOCK_BULLET):
 			continue
+		z.counter_boss_cast("fire")
 		z.take_tick(damage, src)
 		z.ignite(1.6, blue)
 		hit_any = true
@@ -278,10 +294,10 @@ func lob(kind: String, from: Vector2, to: Vector2, damage: float, radius: float)
 func _lob_land(l: Lob) -> void:
 	match l.kind:
 		"grenade":
-			game.explode(l.to, l.damage, l.radius, true, true)
+			_explode(l.to, l.damage, l.radius)
 		"thermite":
 			# 铝热榴弹：打重甲更疼，落点一圈火烧好几秒
-			game.explode(l.to, l.damage, l.radius, true, true, GameData.THERMITE_HEAVY)
+			_explode(l.to, l.damage, l.radius, "fire", GameData.THERMITE_HEAVY)
 			var ground := l.to + GROUND_OFFSET
 			add_fire(ground, GameData.THERMITE_FIRE_TIME)
 			for k in GameData.THERMITE_FIRES - 1:
@@ -342,12 +358,13 @@ func plant_mine(z: Variant, bullet_damage: float) -> void:
 func _ice_burst(pos: Vector2, radius: float, damage: float) -> void:
 	game.fx.ring(pos, radius, 0.25, Color("#c8f4ff"))
 	Sfx.play("cryo", -2.0, 0.2)
+	game.hazards.hit_orb(pos, radius, damage, "ice")
 	for z: Variant in game.zombies_near(pos, radius + 12.0):
 		if z.dead or z.burrowed or z.center().distance_to(pos) > radius + float(z.hit_r):
 			continue
 		z.apply_chill(GameData.FROST_MINE_CHILL)
 		game.fx.frost(z.center())
-		z.take_damage(damage, pos.direction_to(z.center()), 0.0, true, "blast")
+		z.take_damage(damage, pos.direction_to(z.center()), 0.0, true, "blast", "ice")
 
 
 func _bomb_go_off(b: Bomb) -> void:
@@ -356,7 +373,14 @@ func _bomb_go_off(b: Bomb) -> void:
 	elif b.kind == "ice":
 		_ice_burst(b.pos, b.radius, b.damage)
 	else:
-		game.explode(b.pos, b.damage, b.radius, true, true)
+		_explode(b.pos, b.damage, b.radius)
+
+
+func _explode(pos: Vector2, damage: float, radius: float, element := "blast", heavy := 1.0) -> void:
+	var reach: float = radius * game.events.splash_mult * (1.2 if game.hero_id == "demo" else 1.0)
+	var power := damage * (1.15 if game.has_perk("blast_suit") else 1.0)
+	game.hazards.hit_orb(pos, reach, power, element)
+	game.explode(pos, damage, radius, true, true, heavy)
 
 
 ## 闪光弹：范围内僵尸眩晕，坦克和 Boss 时间打折。b.damage 存的是眩晕秒数。
@@ -408,13 +432,16 @@ func arc(from: Vector2, dir: Vector2, length: float, base_damage: float, chain: 
 	for i in chain + 1:
 		var c: Vector2 = cur.center()
 		points.append(c)
-		var hit := dmg
-		# 湿身导电，伤害翻倍（避雷针再乘一点）；只在第一跳飘字，免得一串闪电满屏是字
-		if cur.wet():
-			hit *= GameData.WET_ARC * (GameData.ROD_WET if rod else 1.0)
-			if i == 0:
-				cur.cue("导电", cur.CUE_WET)
-		cur.take_damage(hit, points[points.size() - 2].direction_to(c), knock, true, "arc")
+		if cur is Hazards.Orb:
+			game.hazards.damage_orb(cur, dmg, "normal")
+		else:
+			var hit := dmg
+			# 湿身导电，伤害翻倍（避雷针再乘一点）；只在第一跳飘字，免得一串闪电满屏是字
+			if cur.wet():
+				hit *= GameData.WET_ARC * (GameData.ROD_WET if rod else 1.0)
+				if i == 0:
+					cur.cue("导电", cur.CUE_WET)
+			cur.take_damage(hit, points[points.size() - 2].direction_to(c), knock, true, "arc")
 		done.append(cur)
 		game.fx.zap(c)
 		dmg *= 0.8
@@ -461,6 +488,16 @@ func _arc_first(from: Vector2, dir: Vector2, length: float) -> Variant:
 		if score < best_score:
 			best_score = score
 			best = z
+	for orb: Hazards.Orb in game.hazards.orbs:
+		var to := orb.center() - from
+		var distance := to.length()
+		var off := absf(dir.angle_to(to))
+		if distance > length + Hazards.ORB_R or off > 0.5 or not map.line_clear(ground, orb.pos, map.BLOCK_BULLET):
+			continue
+		var score := distance + off * 90.0
+		if score < best_score:
+			best_score = score
+			best = orb
 	return best
 
 
@@ -474,6 +511,11 @@ func _arc_next(from: Vector2, jump: float, done: Array) -> Variant:
 		if d < best_d:
 			best_d = d
 			best = z
+	for orb: Hazards.Orb in game.hazards.orbs:
+		var distance := orb.center().distance_to(from)
+		if distance < best_d and not done.has(orb):
+			best_d = distance
+			best = orb
 	return best
 
 
@@ -507,6 +549,7 @@ func _step_rang(r: Rang, dt: float) -> bool:
 		p.catch_boomerang()
 		return true
 	var step := r.speed * dt
+	var previous := r.pos
 	if r.returning:
 		var to := hand - r.pos
 		if to.length() < maxf(step, 10.0):
@@ -532,6 +575,11 @@ func _step_rang(r: Rang, dt: float) -> bool:
 		if r.left <= 0.0:
 			r.returning = true
 			r.hits.clear()
+	var orb_hit: Dictionary = game.hazards.orb_on_segment(previous, r.pos, 5.0, r.hits)
+	if not orb_hit.is_empty() and game.hazards.damage_orb(orb_hit["orb"], r.damage, "normal"):
+		r.hits.append(orb_hit["orb"])
+		game.bullets.shots_hit += 1
+		game.on_bullet_hit()
 	for z: Variant in game.zombies_near(r.pos, 24.0):
 		if z.dead or r.hits.has(z) or z.burrowed:
 			continue
