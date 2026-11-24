@@ -1,6 +1,7 @@
 extends Node2D
 ## 玩家：移动、冲刺、瞄准射击、换弹、切枪、道具。输入可以来自键鼠或测试机器人。
 
+const WeaponMods := preload("res://scripts/game/weapon_mods.gd")
 const SPEED := 96.0
 const ACCEL := 16.0
 const DASH_SPEED := 300.0
@@ -112,7 +113,7 @@ func setup(g: Node, m: Node2D) -> void:
 		# 禁冲锋枪契约：开局不给
 		if id == "smg" and g.has_contract("no_smg"):
 			start_level = 0
-		weapon_state[id] = {"level": start_level, "mag": 0, "reserve": spec["start_reserve"]}
+		weapon_state[id] = {"level": start_level, "mag": 0, "reserve": spec["start_reserve"], "mods": WeaponMods.empty_loadout()}
 		_refresh_stats(id)
 		weapon_state[id]["mag"] = int(stats[id]["mag"])
 		if start_level > 0:
@@ -153,8 +154,50 @@ func _has_perk(id: String) -> bool:
 	return game != null and game.has_method("has_perk") and game.has_perk(id)
 
 
+func get_weapon_mods(id: String) -> Dictionary:
+	if not weapon_state.has(id):
+		return WeaponMods.empty_loadout()
+	return WeaponMods.sanitize_mods(weapon_state[id].get("mods"))
+
+
+func equip_weapon_mod(id: String, slot: String, mod_id: String) -> bool:
+	if not weapon_state.has(id) or not owns_weapon(id):
+		return false
+	if not WeaponMods.SLOT_ORDER.has(slot) or not WeaponMods.MODS.has(mod_id):
+		return false
+	if String(WeaponMods.MODS[mod_id]["slot"]) != slot:
+		return false
+	var mods := get_weapon_mods(id)
+	var old_mag := int(stats[id]["mag"])
+	mods[slot] = mod_id
+	weapon_state[id]["mods"] = mods
+	_refresh_stats(id)
+	var new_mag := int(stats[id]["mag"])
+	if new_mag > old_mag:
+		weapon_state[id]["mag"] = mini(int(weapon_state[id]["mag"]) + (new_mag - old_mag), new_mag)
+	else:
+		weapon_state[id]["mag"] = mini(int(weapon_state[id]["mag"]), new_mag)
+	queue_redraw()
+	return true
+
+
+func remove_weapon_mod(id: String, slot: String) -> bool:
+	if not weapon_state.has(id) or not WeaponMods.SLOT_ORDER.has(slot):
+		return false
+	var mods := get_weapon_mods(id)
+	if String(mods.get(slot, "")) == "":
+		return false
+	mods[slot] = ""
+	weapon_state[id]["mods"] = mods
+	_refresh_stats(id)
+	weapon_state[id]["mag"] = mini(int(weapon_state[id]["mag"]), int(stats[id]["mag"]))
+	queue_redraw()
+	return true
+
+
 func _refresh_stats(id: String) -> void:
-	stats[id] = GameData.weapon_stats(id, maxi(int(weapon_state[id]["level"]), 1))
+	var base := GameData.weapon_stats(id, maxi(int(weapon_state[id]["level"]), 1))
+	stats[id] = WeaponMods.apply_to_stats(base, get_weapon_mods(id))
 
 
 func export_run_state() -> Dictionary:
@@ -198,6 +241,7 @@ func import_run_state(d: Dictionary) -> void:
 			var evo: Variant = saved.get("evo", "")
 			if not (evo is String and GameData.EVOLUTIONS.get(evo, {}).get("base") == id):
 				saved.erase("evo")
+			saved["mods"] = WeaponMods.sanitize_mods(saved.get("mods"))
 			weapon_state[id] = saved
 		_refresh_stats(id)
 
@@ -715,6 +759,8 @@ func _animate(dt: float, _move_input: Vector2) -> void:
 	gun.z_index = -1 if dir == Art.DIR_UP else 0
 	# 回旋镖扔出去后手里是空的
 	gun.visible = not bool(stats[weapon_id].get("returns", false)) or int(weapon_state[weapon_id]["mag"]) > 0
+	if stats.has(weapon_id) and bool(stats[weapon_id].get("mod_laser", false)):
+		queue_redraw()
 
 
 func switch_weapon(id: String) -> void:
@@ -798,6 +844,11 @@ func _try_fire() -> void:
 	var damage := float(s["damage"]) * damage_mult()
 	if not returns and _has_perk("last_stand") and int(st["mag"]) <= maxi(1, ceili(float(mag_size()) * 0.25)):
 		damage *= 1.6
+	var crit_chance := float(s.get("mod_crit_chance", 0.0))
+	var crit_proc := crit_chance > 0.0 and randf() < crit_chance
+	if crit_proc:
+		damage *= float(s.get("mod_crit_mult", 1.5))
+		game.fx.text(position + Vector2(0, -24), "暴击！", Color("#ffe060"))
 	if not free_shot:
 		st["mag"] = int(st["mag"]) - 1
 	cooldown = float(s["cooldown"])
@@ -870,7 +921,7 @@ func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 				b.chill = float(s.get("chill", 0.0))
 				b.buckshot = int(s["pellets"]) > 1
 				b.mine = evo == "frost_mine"
-				if dragon and "burn" in b:
+				if (dragon or bool(s.get("mod_burn", false))) and "burn" in b:
 					b.burn = true
 
 
@@ -1021,6 +1072,17 @@ func heal(amount: float) -> void:
 
 
 func _draw() -> void:
+	if alive and game != null and game.player_can_act() and stats.has(weapon_id) and bool(stats[weapon_id].get("mod_laser", false)):
+		var start := Vector2(0, -HAND_H) + aim * (float(Art.guns[weapon_id]["w"]) - 1.0)
+		var laser_len := 150.0
+		var step := 10.0
+		var end_world := position + start
+		for k in int(laser_len / step):
+			var probe := position + start + aim * (float(k + 1) * step)
+			if map.blocks(map.cell_of(probe), map.BLOCK_BULLET):
+				break
+			end_world = probe
+		draw_line(start, end_world - position, Color(1.0, 0.22, 0.22, 0.45), 1.0)
 	if reload_t > 0.0:
 		var ratio := 1.0 - reload_t / reload_total
 		draw_rect(Rect2(-8, -22, 16, 3), Color(0, 0, 0, 0.85))

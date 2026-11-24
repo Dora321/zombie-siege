@@ -1,6 +1,7 @@
 extends Control
 ## 战斗 HUD：血条、弹药、波次、小地图、公告和准星，全部用 _draw 绘制成像素风。
 
+const WeaponMods := preload("res://scripts/game/weapon_mods.gd")
 const DEFAULT_SIZE := Vector2(480, 270)
 const COL_HP := Color("#d83838")
 const COL_BASE := Color("#5a90d0")
@@ -336,6 +337,13 @@ func _draw_weapons() -> void:
 		if selected and p.reload_t > 0.0:
 			var ratio: float = 1.0 - p.reload_t / p.reload_total
 			draw_rect(Rect2(rect.position.x + 1, rect.end.y - 2, (slot_w - 2) * ratio, 1), Color("#f0d050"))
+		# 三个枪械配件槽位小彩点（枪口 / 弹匣 / 瞄具）
+		if p.has_method("get_weapon_mods"):
+			var mod_cols: Array[Color] = WeaponMods.equipped_colors(p.get_weapon_mods(id))
+			for mi in mod_cols.size():
+				var mc: Color = mod_cols[mi]
+				if mc.a > 0.05:
+					draw_rect(Rect2(rect.end.x - 13.0 + mi * 4.0, rect.end.y - 5.0, 3.0, 2.0), mc)
 
 
 ## 道具栏：有存货的道具排成一行，选中的高亮并显示名字。

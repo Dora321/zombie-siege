@@ -894,6 +894,8 @@ func _flow_shop_test(g: Variant) -> void:
 		g.shop_ui._select_tab(Shop.TAB_WEAPON)
 	var ids: Array[String] = []
 	for item: Dictionary in g.shop_items():
+		if item.has("turret_kind") or String(item["id"]) == "turret_sell":
+			continue
 		ids.append(String(item["id"]))
 	for id: String in ids:
 		if id == "turret" or id == "slots":

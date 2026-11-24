@@ -38,6 +38,7 @@ const REPAIR_COLOR := Color("#88f098")
 @onready var hud: Control = $UI/HUD
 @onready var touch_ui: Control = $UI/TouchControls
 @onready var shop_ui: Control = $UI/Shop
+@onready var gunsmith_ui: Control = $UI/GunsmithPanel
 @onready var perk_ui: Control = $UI/PerkPicker
 @onready var pause_ui: Control = $UI/PauseMenu
 @onready var over_ui: Control = $UI/GameOver
@@ -167,6 +168,8 @@ func _ready() -> void:
 	hud.setup(self)
 	touch_ui.setup(self)
 	shop_ui.setup(self)
+	gunsmith_ui.setup(self)
+	gunsmith_ui.closed.connect(_on_gunsmith_closed)
 	perk_ui.setup(self)
 	pause_ui.setup(self)
 	over_ui.setup(self)
@@ -1058,6 +1061,7 @@ func _finish_game(reason: String) -> void:
 	end_reason = reason
 	_over_t = 1.6
 	shop_ui.close()
+	gunsmith_ui.hide()
 	perk_ui.hide()
 	# 最后的慢镜头
 	Engine.time_scale = 0.35 if not victory else 1.0
@@ -1217,6 +1221,19 @@ func turret_cost_for(kind := "mg") -> int:
 	var spec: Dictionary = GameData.TURRET_TYPES.get(kind, GameData.TURRET_TYPES["mg"])
 	var discount := 0.75 if hero_id == "engineer" else 1.0
 	return roundi(Shop.turret_cost(self) * float(spec["cost_mult"]) * discount)
+
+
+func open_gunsmith(weapon_id := "") -> void:
+	if state != State.SHOP:
+		return
+	shop_ui.close()
+	gunsmith_ui.open(weapon_id)
+
+
+func _on_gunsmith_closed() -> void:
+	if state == State.SHOP:
+		_save_resume_state()
+		shop_ui.open()
 
 
 func begin_turret_placement(kind := "") -> void:
