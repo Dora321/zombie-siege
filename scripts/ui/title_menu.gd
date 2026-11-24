@@ -16,9 +16,12 @@ const TOUCH_HELP := """左摇移动，右摇瞄准并开火
 @onready var resume_button: Button = %ResumeButton
 @onready var start_button: Button = %StartButton
 @onready var boss_rush_button: Button = %BossRushButton
+@onready var daily_button: Button = %DailyButton
 @onready var help_button: Button = %HelpButton
 @onready var bestiary_button: Button = %BestiaryButton
+@onready var achievements_button: Button = %AchievementsButton
 @onready var bestiary_panel: Control = %BestiaryPanel
+@onready var achievements_panel: Control = %AchievementsPanel
 @onready var map_panel: Control = %MapPanel
 @onready var prep_panel: Control = %PrepPanel
 @onready var clear_button: Button = %ClearButton
@@ -52,10 +55,18 @@ func _ready() -> void:
 	resume_button.pressed.connect(_on_resume)
 	start_button.pressed.connect(_on_start)
 	boss_rush_button.pressed.connect(_open_map.bind("boss_rush"))
-	boss_rush_button.visible = not Harness.automated()
+	daily_button.pressed.connect(_on_daily)
+	achievements_button.pressed.connect(_on_achievements)
+	var show_extra_entries := not Harness.automated()
+	boss_rush_button.visible = show_extra_entries
+	daily_button.visible = show_extra_entries
+	achievements_button.visible = show_extra_entries
 	help_button.pressed.connect(_on_help)
 	bestiary_button.pressed.connect(_on_bestiary)
 	bestiary_panel.closed.connect(_focus_start)
+	achievements_panel.closed.connect(func():
+		if not Mobile.is_touch():
+			achievements_button.grab_focus())
 	map_panel.closed.connect(_focus_start)
 	map_panel.chosen.connect(_on_map_chosen)
 	prep_panel.closed.connect(func(): map_panel.open())
@@ -67,7 +78,10 @@ func _ready() -> void:
 		Sfx.play("ui_click")
 		_focus_start())
 	var touch := Mobile.is_touch()
-	for b: Button in [resume_button, start_button, boss_rush_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
+	for b: Button in [
+		resume_button, start_button, boss_rush_button, daily_button, help_button,
+		bestiary_button, achievements_button, clear_button, quit_button, help_close,
+	]:
 		if touch:
 			b.focus_mode = Control.FOCUS_NONE
 			b.custom_minimum_size.y = 22.0
@@ -83,6 +97,8 @@ func _ready() -> void:
 	_fit_content()
 	_refresh_scores()
 	_refresh_resume()
+	if daily_button.visible:
+		_refresh_daily_preview(GameData.daily_config())
 	_focus_start()
 	if Sfx.audio_unlocked:
 		Sfx.play_music("menu")
@@ -156,17 +172,24 @@ func _refresh_scores() -> void:
 	if Save.best_boss_rush_time > 0.0:
 		var seconds := int(Save.best_boss_rush_time)
 		lines.append("连战最快：%d:%02d" % [floori(Save.best_boss_rush_time / 60.0), seconds % 60])
+	var daily_best := Save.today_daily_best()
+	if daily_best > 0:
+		lines.append("今日挑战：%d 分" % daily_best)
 	scores_label.text = "\n".join(lines)
+
+
+func _refresh_daily_preview(config: Dictionary) -> void:
+	daily_button.text = "每日挑战 ★" if Save.daily_date == String(config["date"]) else "每日挑战"
+	daily_button.tooltip_text = "%s   %s   危%d" % [
+		GameData.MAPS[config["map_id"]]["name"],
+		GameData.HEROES[config["hero_id"]]["name"],
+		int(config["danger"]),
+	]
 
 
 func _refresh_resume() -> void:
 	var summary: Dictionary = {} if Harness.automated() else Save.load_resume_summary()
 	resume_button.visible = not summary.is_empty()
-	var menu: VBoxContainer = resume_button.get_parent()
-	var separation := 2 if resume_button.visible else 5
-	if Mobile.is_touch() and resume_button.visible:
-		separation = 0
-	menu.add_theme_constant_override("separation", separation)
 	if resume_button.visible:
 		var next_wave := int(summary["wave"]) + 1
 		resume_button.text = ("继续无尽第 %d 波" if bool(summary["endless"]) else "继续第 %d 波") % next_wave
@@ -184,6 +207,16 @@ func _on_resume() -> void:
 
 func _on_start() -> void:
 	_open_map("normal")
+
+
+func _on_daily() -> void:
+	var dc := GameData.daily_config()
+	_refresh_daily_preview(dc)
+	Save.game_mode = "daily"
+	Save.pending_resume = {}
+	Save.clear_resume_run()
+	Sfx.play("ui_click")
+	get_tree().change_scene_to_file("res://scenes/game.tscn")
 
 
 func _open_map(mode: String) -> void:
@@ -216,6 +249,11 @@ func _on_help() -> void:
 func _on_bestiary() -> void:
 	Sfx.play("ui_click")
 	bestiary_panel.open()
+
+
+func _on_achievements() -> void:
+	Sfx.play("ui_click")
+	achievements_panel.open()
 
 
 func _on_clear() -> void:
@@ -297,4 +335,4 @@ func _draw_heading() -> void:
 	tf.draw_string(ci, at + Vector2(0.25, 0.25), title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.3, 0.04, 0.05))
 	tf.draw_string(ci, at, title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.95, 0.22 + pulse * 0.12, 0.14))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	Art.draw_text(self, "ZOMBIE  SIEGE", layout * Vector2(240, 80), 12, Color("#c8c4b8"), 1)
+	Art.draw_text(self, "ZOMBIE  SIEGE", layout * Vector2(240, 70), 12, Color("#c8c4b8"), 1)

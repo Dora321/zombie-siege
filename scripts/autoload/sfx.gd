@@ -520,6 +520,22 @@ func _build_sfx() -> void:
 		b = _voice(b, i * 0.15, 0.32 if i < 5 else 0.6, up[i], up[i], "sq", 0.2, 1.2)
 	_add("victory", b)
 
+	b = _buf(0.65)
+	b = _voice(b, 0, 0.31, 105, 37, "sin", 0.47, 1.8)
+	b = _voice(b, 0.025, 0.62, 165, 660, "saw", 0.22, 0.85)
+	b = _voice(b, 0.025, 0.62, 247, 988, "saw", 0.14, 0.85)
+	b = _voice(b, 0.025, 0.62, 330, 1320, "saw", 0.11, 0.85)
+	b = _voice(b, 0.23, 0.40, 3800, 8100, "noise", 0.16, 1.6)
+	_add("overdrive", b)
+
+	b = _buf(0.55)
+	for i in notes.size():
+		var frequency: float = notes[i]
+		var duration := 0.09 if i < notes.size() - 1 else 0.25
+		b = _voice(b, i * 0.10, duration, frequency, frequency, "sq", 0.13, 1.4)
+		b = _voice(b, i * 0.10, duration, frequency, frequency, "tri", 0.29, 1.2)
+	_add("achievement", b)
+
 
 # ---------------------------------------------------------------------------
 # 背景音乐：后台线程渲染的芯片音乐循环

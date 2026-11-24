@@ -1,0 +1,93 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/achievements_panel.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="ModalFrame"]
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
+bg_color = Color(0.063, 0.059, 0.086, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.42, 0.34, 0.25, 1)
+anti_aliasing = false
+
+[sub_resource type="StyleBoxFlat" id="CareerStrip"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0.12, 0.113, 0.146, 1)
+border_width_bottom = 1
+border_color = Color(0.28, 0.24, 0.29, 1)
+anti_aliasing = false
+
+[node name="AchievementsPanel" type="PanelContainer"]
+offset_right = 452.0
+offset_bottom = 258.0
+mouse_filter = 0
+theme_override_styles/panel = SubResource("ModalFrame")
+script = ExtResource("1")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 5
+
+[node name="Heading" type="Label" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.45, 1)
+horizontal_alignment = 1
+
+[node name="CareerStrip" type="PanelContainer" parent="Layout"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("CareerStrip")
+
+[node name="CareerStats" type="Label" parent="Layout/CareerStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.83, 0.81, 0.76, 1)
+theme_override_constants/line_spacing = 2
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+focus_mode = 2
+focus_neighbor_left = NodePath(".")
+focus_neighbor_top = NodePath(".")
+focus_neighbor_right = NodePath(".")
+focus_neighbor_bottom = NodePath(".")
+focus_next = NodePath("../Close")
+focus_previous = NodePath("../Close")
+draw_focus_border = true
+horizontal_scroll_mode = 0
+
+[node name="Badges" type="GridContainer" parent="Layout/Scroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/h_separation = 5
+theme_override_constants/v_separation = 5
+columns = 2
+
+[node name="Close" type="Button" parent="Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(92, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+focus_neighbor_left = NodePath(".")
+focus_neighbor_top = NodePath(".")
+focus_neighbor_right = NodePath(".")
+focus_neighbor_bottom = NodePath(".")
+focus_next = NodePath("../Scroll")
+focus_previous = NodePath("../Scroll")
+mouse_default_cursor_shape = 2
+text = "关闭"
