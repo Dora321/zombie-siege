@@ -77,11 +77,13 @@ var _flash_t := 0.0
 var _dir := 0
 var _walk := 0.0
 var _ghost_t := 0.0
+var _overdrive_ghost_t := 0.0
 var _no_ammo_note := 0.0
 var _body_key := -1
 # 单次按键用事件锁存，命中停顿拉慢物理帧时也不会丢
 var _latch_dash := false
 var _latch_reload := false
+var _latch_overdrive := false
 var _latch_weapon := -1
 var _latch_item := ""
 var _latch_item_next := false
@@ -392,7 +394,8 @@ func try_evolve(id: String) -> bool:
 
 
 func damage_mult() -> float:
-	return GameData.DAMAGE_BUFF if buff_damage_t > 0.0 else 1.0
+	var mult := GameData.DAMAGE_BUFF if buff_damage_t > 0.0 else 1.0
+	return mult * 1.25 if game.overdrive_active() else mult
 
 
 func muzzle_pos() -> Vector2:
@@ -439,6 +442,11 @@ func _set_gun_sprite() -> void:
 func _physics_process(dt: float) -> void:
 	if not alive:
 		return
+	if _latch_overdrive or Mobile.latch_overdrive:
+		_latch_overdrive = false
+		Mobile.latch_overdrive = false
+		if game.activate_overdrive():
+			reload_t = 0.0
 	var control: bool = game.player_can_act()
 	var move_input := Vector2.ZERO
 	var firing := false
@@ -578,7 +586,8 @@ func _physics_process(dt: float) -> void:
 		# 同一帧还可能开火，投掷落点只对道具生效。
 		aim = weapon_aim
 		aim_point = weapon_aim_point
-	var spinning := firing and evolution(weapon_id) == "pulse_minigun" and reload_t <= 0.0 and dash_t <= 0.0 and (buff_ammo_t > 0.0 or int(weapon_state[weapon_id]["mag"]) > 0)
+	var can_spin: bool = buff_ammo_t > 0.0 or game.overdrive_active() or int(weapon_state[weapon_id]["mag"]) > 0
+	var spinning := firing and evolution(weapon_id) == "pulse_minigun" and reload_t <= 0.0 and dash_t <= 0.0 and can_spin
 	_minigun_spin = move_toward(_minigun_spin, 1.0 if spinning else 0.0, dt * (2.0 if spinning else 1.6))
 	if firing:
 		_try_fire()
@@ -649,6 +658,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_latch_dash = true
 	elif event.is_action_pressed("reload"):
 		_latch_reload = true
+	elif event.is_action_pressed("overdrive"):
+		_latch_overdrive = true
 	elif event.is_action_pressed("weapon_next"):
 		_latch_weapon = _next_owned(1)
 	elif event.is_action_pressed("weapon_prev"):
@@ -707,11 +718,12 @@ func _update_body_tint() -> void:
 
 
 func _move(move_input: Vector2, dt: float) -> void:
+	var overdrive: bool = game.overdrive_active() and game.player_can_act()
 	if dash_t > 0.0:
 		dash_t -= dt
 		velocity = dash_dir * DASH_SPEED
 		_ghost_t -= dt
-		if _ghost_t <= 0.0:
+		if _ghost_t <= 0.0 and not overdrive:
 			_ghost_t = 0.03
 			game.fx.ghost(body.texture, position + body.offset, body.flip_h, Color(0.5, 0.85, 1.0, 0.55), 0.2)
 		if dash_t <= 0.0:
@@ -720,11 +732,21 @@ func _move(move_input: Vector2, dt: float) -> void:
 		var target: Vector2 = move_input.limit_length(1.0) * move_speed()
 		velocity = velocity.lerp(target, clampf(ACCEL * game.events.traction_at(position) * dt, 0.0, 1.0))
 	_knock = _knock.lerp(Vector2.ZERO, clampf(10.0 * dt, 0.0, 1.0))
+	var previous := position
 	position = map.move_box(position, (velocity + _knock) * dt, BOX_R, map.BLOCK_PLAYER)
+	if overdrive and position.distance_squared_to(previous) > 0.01:
+		_overdrive_ghost_t -= dt
+		if _overdrive_ghost_t <= 0.0:
+			_overdrive_ghost_t += 0.08
+			game.fx.ghost(body.texture, previous + body.offset, body.flip_h, Color(game.OVERDRIVE_COLOR, 0.55), 0.2)
+	else:
+		_overdrive_ghost_t = 0.0
 
 
 func move_speed() -> float:
 	var speed := SPEED * speed_mult * float(game.events.player_speed) * (GameData.SPEED_BUFF if buff_speed_t > 0.0 else 1.0)
+	if game.overdrive_active():
+		speed *= 1.20
 	return speed * 1.12 if _has_perk("overclock") else speed
 
 
@@ -788,7 +810,7 @@ func mag_size() -> int:
 
 func start_reload() -> void:
 	var st: Dictionary = weapon_state[weapon_id]
-	if reload_t > 0.0 or int(st["mag"]) >= mag_size() or buff_ammo_t > 0.0:
+	if reload_t > 0.0 or int(st["mag"]) >= mag_size() or buff_ammo_t > 0.0 or game.overdrive_active():
 		return
 	if bool(stats[weapon_id].get("returns", false)):
 		return
@@ -833,8 +855,9 @@ func _try_fire() -> void:
 	var st: Dictionary = weapon_state[weapon_id]
 	var s: Dictionary = stats[weapon_id]
 	var returns := bool(s.get("returns", false))
+	var overdrive: bool = game.overdrive_active()
 	# 无限弹药对回旋镖无效：手里没镖就是没镖
-	var free_shot := buff_ammo_t > 0.0 and not returns
+	var free_shot := (buff_ammo_t > 0.0 or overdrive) and not returns
 	if int(st["mag"]) <= 0 and not free_shot:
 		cooldown = 0.18
 		if not returns:
@@ -852,6 +875,8 @@ func _try_fire() -> void:
 	if not free_shot:
 		st["mag"] = int(st["mag"]) - 1
 	cooldown = float(s["cooldown"])
+	if overdrive:
+		cooldown *= 0.70
 	if evolution(weapon_id) == "pulse_minigun":
 		cooldown *= lerpf(1.0, 0.68, _minigun_spin)
 	var muzzle := muzzle_pos()
@@ -866,7 +891,7 @@ func _try_fire() -> void:
 	fired_kick = minf(fired_kick + 0.35, 1.0)
 	velocity -= aim * float(s["recoil"]) * 6.0
 	Sfx.play(String(s["sfx"]))
-	if int(st["mag"]) <= 0:
+	if int(st["mag"]) <= 0 and not free_shot:
 		start_reload()
 
 

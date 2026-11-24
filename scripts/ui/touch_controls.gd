@@ -1,7 +1,7 @@
 extends Control
 ## 双摇杆和战斗快捷键。每个触点在抬起前只控制按下时选中的控件。
 
-enum Target {NONE, MOVE, AIM, DASH, RELOAD, ITEM, QUICK_MEDKIT, PAUSE, PLACE, CONFIRM, CANCEL}
+enum Target {NONE, MOVE, AIM, DASH, RELOAD, ITEM, QUICK_MEDKIT, PAUSE, PLACE, CONFIRM, CANCEL, OVERDRIVE}
 
 const Shop := preload("res://scripts/game/shop_catalog.gd")
 const MOUSE_FINGER := -2
@@ -9,6 +9,7 @@ const STICK_RADIUS := 26.0
 const DASH_RADIUS := 14.0
 const RELOAD_RADIUS := 12.0
 const ITEM_RADIUS := 13.0
+const OVERDRIVE_RADIUS := 15.0
 const AIM_DEADZONE := 0.14
 const ITEM_DRAG_THRESHOLD := 7.0
 const ITEM_DRAG_RADIUS := 36.0
@@ -50,6 +51,7 @@ var _reload_center := Vector2.ZERO
 var _item_center := Vector2.ZERO
 var _item_cancel_center := Vector2.ZERO
 var _medkit_center := Vector2.ZERO
+var _overdrive_center := Vector2.ZERO
 var _pause_rect := Rect2()
 var _confirm_rect := Rect2()
 var _cancel_rect := Rect2()
@@ -109,6 +111,7 @@ func _layout() -> void:
 	_item_center = _aim_home + Vector2(2, -44)
 	_item_cancel_center = _item_center + Vector2(0, -56)
 	_medkit_center = _move_home + Vector2(44, 24)
+	_overdrive_center = _aim_home + Vector2(-74, -40)
 	_pause_rect = Rect2(Vector2(bottom_right.x - 20.0, top_left.y + 4.0).round(), Vector2(16, 16))
 	_confirm_rect = Rect2((bottom_right - Vector2(66, 64)).round(), Vector2(54, 24))
 	_cancel_rect = Rect2((bottom_right - Vector2(66, 36)).round(), Vector2(54, 24))
@@ -181,6 +184,8 @@ func _target_at(pos: Vector2) -> Target:
 		return Target.ITEM
 	if pos.distance_to(_medkit_center) <= ITEM_RADIUS + 3.0 and _quick_medkit_available():
 		return Target.QUICK_MEDKIT
+	if game.overdrive_ready() and pos.distance_to(_overdrive_center) <= OVERDRIVE_RADIUS + 3.0:
+		return Target.OVERDRIVE
 	if _aim_finger == -1 and (pos.distance_to(_aim_home) <= STICK_RADIUS + 14.0 or (pos.x >= size.x * 0.5 and pos.y >= _safe_rect.position.y + 92.0)):
 		return Target.AIM
 	if _move_finger == -1 and pos.x < size.x * 0.5 and pos.y >= _safe_rect.position.y + 50.0:
@@ -225,6 +230,8 @@ func _pointer_button(index: int, pos: Vector2, pressed: bool, canceled: bool) ->
 					Mobile.latch_dash = true
 				Target.RELOAD:
 					Mobile.latch_reload = true
+				Target.OVERDRIVE:
+					Mobile.latch_overdrive = true
 				Target.ITEM:
 					if _item_finger == -1:
 						var id: String = game.player.selected_item
@@ -413,6 +420,12 @@ func _draw_actions() -> void:
 		var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.008)
 		draw_arc(_medkit_center, ITEM_RADIUS + 2.0 + pulse * 2.0, 0.0, TAU, 24, Color(CANCEL_COLOR, 0.25 + pulse * 0.45), 1.0)
 		_draw_item_button(_medkit_center, "medkit", int(player.items["medkit"]), READY_COLOR, Target.QUICK_MEDKIT)
+	if game.overdrive_ready():
+		var color: Color = game.OVERDRIVE_COLOR
+		var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.008)
+		_plate(_overdrive_center, OVERDRIVE_RADIUS + 3.0 + 2.0 * pulse, Color(color, 0.08 + 0.1 * pulse), Color(color, 0.25 + 0.4 * pulse))
+		_draw_action_plate(_overdrive_center, OVERDRIVE_RADIUS, color, Target.OVERDRIVE)
+		Art.draw_text(self, "狂暴", _overdrive_center + Vector2(0, -6), 12, color, 1)
 
 
 func _draw_item_button(center: Vector2, id: String, count: int, color: Color, target: Target) -> void:

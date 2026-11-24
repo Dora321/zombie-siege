@@ -10,6 +10,7 @@ const COL_DIM := Color(0, 0, 0, 0.55)
 const BOSS_BAR_W := 200.0
 const BAR_TOUCH_PADDING := 3.0
 const TOUCH_MINIMAP_TOP := 46.0
+const ACHIEVEMENT_TOAST_DURATION := 3.4
 const THROWABLE_RADII := {"frag": 44.0, "sticky": 38.0, "flash": 84.0, "decoy": 72.0}
 
 var game: Node
@@ -23,6 +24,8 @@ var _shown_coins := 0
 var _flash_a := 0.0
 var _flash_color := Color.WHITE
 var _warns: Array[Dictionary] = []
+var _achievement_toasts: Array[Dictionary] = []
+var _toast_layer: Node2D
 var _view_size := DEFAULT_SIZE
 var _safe_rect := Rect2(Vector2.ZERO, DEFAULT_SIZE)
 var _touch := false
@@ -30,9 +33,40 @@ var _weapon_rects: Array[Dictionary] = []
 var _item_rects: Array[Dictionary] = []
 
 
+func _ready() -> void:
+	_toast_layer = Node2D.new()
+	_toast_layer.z_index = 1
+	add_child(_toast_layer)
+	_toast_layer.draw.connect(_draw_achievement_toast)
+
+
 func setup(g: Node) -> void:
 	game = g
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if not Save.achievement_unlocked.is_connected(_on_achievement_unlocked):
+		Save.achievement_unlocked.connect(_on_achievement_unlocked)
+
+
+func _exit_tree() -> void:
+	if Save.achievement_unlocked.is_connected(_on_achievement_unlocked):
+		Save.achievement_unlocked.disconnect(_on_achievement_unlocked)
+
+
+func _on_achievement_unlocked(id: String) -> void:
+	var achievement: Dictionary = GameData.ACHIEVEMENTS[id]
+	_achievement_toasts.append({
+		"name": String(achievement["name"]), "desc": String(achievement["desc"]),
+		"color": Color(String(achievement["color"])), "t": ACHIEVEMENT_TOAST_DURATION,
+	})
+	if _achievement_toasts.size() == 1:
+		_play_achievement_sound()
+
+
+func _play_achievement_sound() -> void:
+	if Sfx._streams.has("achievement"):
+		Sfx.play("achievement")
+	else:
+		Sfx.play("victory", -8.0)
 
 
 func _hud_size() -> Vector2:
@@ -132,6 +166,14 @@ func _process(dt: float) -> void:
 				_warns.remove_at(i)
 	if game != null:
 		_shown_coins = int(move_toward(_shown_coins, game.coins, maxf(1.0, dt * 200.0)))
+	if not _achievement_toasts.is_empty():
+		var toast := _achievement_toasts[0]
+		toast["t"] = float(toast["t"]) - dt / maxf(Engine.time_scale, 0.01)
+		if float(toast["t"]) <= 0.0:
+			_achievement_toasts.pop_front()
+			if not _achievement_toasts.is_empty():
+				_play_achievement_sound()
+		_toast_layer.queue_redraw()
 	queue_redraw()
 
 
@@ -144,7 +186,10 @@ func _draw() -> void:
 	_safe_rect = _safe_bounds(_view_size)
 	_touch = Mobile.is_touch()
 	var in_shop: bool = game.state == game.State.SHOP
+	var toast_offset := 0.0 if _achievement_toasts.is_empty() else 34.0
 	_draw_vignette()
+	if game.overdrive_active() and game.player_can_act():
+		_draw_overdrive_glow()
 	var throwable_aiming: bool = _touch and Mobile.item_aiming and game.player_can_act() and not get_tree().paused
 	if throwable_aiming:
 		_draw_throwable_aim()
@@ -161,11 +206,13 @@ func _draw() -> void:
 	if _flash_a > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, _view_size), Color(_flash_color.r, _flash_color.g, _flash_color.b, minf(_flash_a, 0.9)))
 	if _announce_t > 0.0 and not get_tree().paused:
-		_draw_announce()
+		_draw_announce(toast_offset)
 	if not get_tree().paused and not in_shop:
-		_draw_event_warns()
+		_draw_event_warns(toast_offset)
 	if _alert_t > 0.0 and int(_alert_t * 5.0) % 2 == 0 and not in_shop:
 		var alert_y := 44.0 if game.boss_list.is_empty() else 51.0
+		if toast_offset > 0.0:
+			alert_y = 78.0
 		Art.draw_text(self, "基地遭到攻击！", Vector2(_view_size.x * 0.5, _safe_rect.position.y + alert_y), 12, Color("#ff7050"), 1)
 	if game.state == game.State.PLACING:
 		_draw_placement()
@@ -200,6 +247,14 @@ func _draw_status() -> void:
 	# 冲刺冷却
 	var dash_ratio: float = 1.0 - clampf(p.dash_cd / p.dash_cd_base, 0.0, 1.0)
 	_bar(Rect2(15, 26, 36, 2), dash_ratio, Color("#60d0e0") if dash_ratio >= 1.0 else Color("#3a7a88"))
+	var active: bool = game.overdrive_active()
+	var overdrive_ratio: float = game.overdrive_t / GameData.OVERDRIVE_DURATION if active else game.overdrive_charge / GameData.OVERDRIVE_MAX
+	var energy_color := Color("#c89a38")
+	if active or game.overdrive_ready():
+		var gold: Color = game.OVERDRIVE_COLOR
+		var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.008)
+		energy_color = gold.lerp(Color("#fff6b0"), pulse * 0.55)
+	_bar(Rect2(15, 31, 36, 3), overdrive_ratio, energy_color)
 	if _touch and Save.auto_fire_on:
 		var label := "自动开火"
 		var width := Art.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
@@ -214,7 +269,7 @@ func _draw_status() -> void:
 
 ## 生效中的药水：图标加剩余时间条。
 func _draw_buffs(p: Variant) -> void:
-	var y := 32
+	var y := 38
 	for buff: Array in [["speed", p.buff_speed_t], ["damage", p.buff_damage_t], ["inf_ammo", p.buff_ammo_t]]:
 		var left: float = buff[1]
 		if left <= 0.0:
@@ -239,10 +294,17 @@ func _draw_wave_info() -> void:
 		label = "连战 %d / %d" % [game.wave, GameData.boss_rush_wave_count()]
 		color = Color("#ff9860")
 	Art.draw_text(self, label, top_center + Vector2(0, 2), 12, color, 1)
+	var label_half := Art.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x * 0.5
 	# 危险等级和契约倍率，跟在波数后面
 	if game.score_mult > 1.0:
-		var label_end := Art.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x * 0.5 + 4.0
-		Art.draw_text(self, "危%d %s" % [game.danger, GameData.mult_text(game.score_mult)], top_center + Vector2(label_end, 2), 12, Color("#ff9070"))
+		Art.draw_text(self, "危%d %s" % [game.danger, GameData.mult_text(game.score_mult)], top_center + Vector2(label_half + 4.0, 2), 12, Color("#ff9070"))
+	if game.daily_run:
+		var badge := "每日挑战"
+		var width := Art.font.get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 8.0
+		var rect := Rect2(top_center + Vector2(-label_half - width - 5.0, 1), Vector2(width, 14.0))
+		draw_rect(rect, Color("#332b19"))
+		draw_rect(rect, Color("#74623a"), false)
+		Art.draw_text(self, badge, rect.position + Vector2(4, 0), 12, Color("#dfc382"))
 	draw_texture(Art.skull_tex, top_center + Vector2(-18, 18))
 	Art.draw_tiny(self, str(left), top_center + Vector2(-7, 20), Color("#f0a090"))
 	if not game.boss_list.is_empty():
@@ -471,8 +533,8 @@ func _draw_event_chips() -> void:
 
 
 ## 事件预警条：比波次公告小一号，放在公告下面。
-func _draw_event_warns() -> void:
-	var y := _safe_rect.position.y + 108.0
+func _draw_event_warns(toast_offset: float) -> void:
+	var y := _safe_rect.position.y + 108.0 + toast_offset
 	var width := _view_size.x
 	for warn: Dictionary in _warns:
 		var left: float = warn["t"]
@@ -494,17 +556,42 @@ func event_warn_titles() -> Array[String]:
 	return out
 
 
-func _draw_announce() -> void:
+func _draw_announce(toast_offset: float) -> void:
 	var alpha := clampf(_announce_t * 2.5, 0.0, 1.0)
 	var elapsed := _announce_dur - _announce_t
 	var pop := clampf(elapsed * 6.0, 0.0, 1.0)
-	var y := _safe_rect.position.y + lerpf(58.0, 66.0, pop)
+	var y := _safe_rect.position.y + lerpf(58.0, 66.0, pop) + toast_offset
 	var width := _view_size.x
 	draw_rect(Rect2(0, y - 4, width, 42), Color(0, 0, 0, 0.5 * alpha))
 	draw_rect(Rect2(0, y - 4, width, 1), Color(1.0, 0.75, 0.3, 0.6 * alpha))
 	draw_rect(Rect2(0, y + 37, width, 1), Color(1.0, 0.75, 0.3, 0.6 * alpha))
 	Art.draw_text(self, _title, Vector2(width * 0.5, y), 24, Color(1.0, 0.85, 0.5, alpha), 1)
 	Art.draw_text(self, _sub, Vector2(width * 0.5, y + 24), 12, Color(0.92, 0.9, 0.84, alpha), 1)
+
+
+func _draw_achievement_toast() -> void:
+	if _achievement_toasts.is_empty():
+		return
+	var toast := _achievement_toasts[0]
+	var left := float(toast["t"])
+	var slide := smoothstep(0.0, 0.25, ACHIEVEMENT_TOAST_DURATION - left)
+	var alpha := minf(slide, clampf(left / 0.32, 0.0, 1.0))
+	var center_x := _safe_rect.get_center().x
+	var y := roundf(_safe_rect.position.y + lerpf(36.0, 48.0, slide))
+	var rect := Rect2(roundf(center_x - 105.0), y, 210.0, 28.0)
+	var accent := Color(toast["color"], alpha)
+	_toast_layer.draw_rect(Rect2(rect.position + Vector2(2, 2), rect.size), Color(0, 0, 0, 0.45 * alpha))
+	_toast_layer.draw_rect(rect, Color(0.12, 0.10, 0.08, 0.95 * alpha))
+	_toast_layer.draw_rect(rect, Color(game.OVERDRIVE_COLOR, 0.7 * alpha), false)
+	_toast_layer.draw_rect(Rect2(rect.position + Vector2(1, 1), Vector2(2, 26)), accent)
+	Art.draw_text(_toast_layer, "成就解锁：" + String(toast["name"]), Vector2(center_x, y + 1), 12, accent, 1)
+	Art.draw_text(_toast_layer, String(toast["desc"]), Vector2(center_x, y + 14), 12, Color(0.95, 0.90, 0.8, alpha), 1)
+
+
+func _draw_overdrive_glow() -> void:
+	var gold: Color = game.OVERDRIVE_COLOR
+	draw_rect(Rect2(Vector2(3, 3), _view_size - Vector2(6, 6)), Color(gold, 0.06), false, 6.0)
+	draw_rect(Rect2(Vector2.ONE, _view_size - Vector2(2, 2)), Color(gold, 0.18), false, 2.0)
 
 
 func _draw_vignette() -> void:

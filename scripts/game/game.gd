@@ -23,6 +23,7 @@ const BOSS_SPAWN_SLOW := 1.8
 const BOSS_DOWN_HOLD := 2.2
 const AUTO_REPAIR_INTERVAL := 4.0
 const REPAIR_COLOR := Color("#88f098")
+const OVERDRIVE_COLOR := Color("#ffe060")
 
 @onready var map: Node2D = $Map
 @onready var decals: Node2D = $Decals
@@ -52,6 +53,8 @@ var coins_earned := 0
 var combo := 0
 var combo_t := 0.0
 var best_combo := 0
+var overdrive_charge := 0.0
+var overdrive_t := 0.0
 var time_alive := 0.0
 var turret_level := 1
 ## 基地有装甲：僵尸对基地的伤害打折，否则尸群一贴上来几秒就没了。
@@ -63,6 +66,8 @@ var god_mode := false
 var victory := false
 var endless := false
 var boss_rush := false
+var daily_run := false
+var daily_date := ""
 var hero_id := "captain"
 var perks: Array[String] = []
 var placing_turret_kind := "mg"
@@ -132,12 +137,26 @@ func _ready() -> void:
 		Save.danger = int(resume.get("danger", 0))
 		Save.contracts.assign(resume.get("contracts", []))
 		Save.hero_id = String(resume.get("hero_id", "captain"))
+		daily_run = bool(resume.get("daily_run", false))
+		daily_date = String(resume.get("daily_date", ""))
 		Save.game_mode = "boss_rush" if bool(resume.get("boss_rush", false)) else "normal"
+		if daily_run:
+			Save.game_mode = "daily"
+			_rng.seed = int(GameData.daily_config(daily_date)["seed"])
 	if not Harness.automated():
 		hero_id = Save.hero_id if GameData.HEROES.has(Save.hero_id) else "captain"
 		boss_rush = Save.game_mode == "boss_rush"
 	danger = Save.danger
 	contracts = Save.contracts.duplicate()
+	if resume.is_empty() and Save.game_mode == "daily" and not Harness.automated():
+		var dc := GameData.daily_config()
+		daily_run = true
+		daily_date = String(dc["date"])
+		_rng.seed = int(dc["seed"])
+		hero_id = String(dc["hero_id"])
+		danger = int(dc["danger"])
+		contracts.assign(dc["contracts"])
+		Save.map_id = String(dc["map_id"])
 	score_mult = GameData.run_mult(danger, contracts)
 	regen_on = has_contract("regen")
 	_map_spec = GameData.MAPS[Save.map_id]
@@ -229,6 +248,8 @@ func _save_resume_state() -> void:
 		}
 	Save.save_resume_run({
 		"wave": wave, "endless": endless, "boss_rush": boss_rush, "score": score, "raw_score": raw_score,
+		"daily_run": daily_run, "daily_date": daily_date,
+		"overdrive_charge": overdrive_charge, "overdrive_t": overdrive_t,
 		"hero_id": hero_id, "perks": perks, "perk_choices": _perk_choices,
 		"auto_repair_t": _auto_repair_t, "vamp_kills": _vamp_kills,
 		"coins": coins, "kills": kills, "coins_earned": coins_earned,
@@ -260,6 +281,8 @@ func _restore_resume_state(data: Dictionary) -> void:
 	kills = int(data.get("kills", 0))
 	coins_earned = int(data.get("coins_earned", 0))
 	best_combo = int(data.get("best_combo", 0))
+	overdrive_charge = clampf(float(data.get("overdrive_charge", 0.0)), 0.0, GameData.OVERDRIVE_MAX)
+	overdrive_t = clampf(float(data.get("overdrive_t", 0.0)), 0.0, GameData.OVERDRIVE_DURATION)
 	time_alive = float(data.get("time_alive", 0.0))
 	bullets.shots_fired = int(data.get("shots_fired", 0))
 	bullets.shots_hit = int(data.get("shots_hit", 0))
@@ -351,6 +374,8 @@ func _restore_player_fallback(data: Dictionary) -> void:
 func _physics_process(dt: float) -> void:
 	_rebuild_buckets()
 	_state_t -= dt
+	if player_can_act():
+		overdrive_t = maxf(overdrive_t - dt, 0.0)
 	match state:
 		State.COUNTDOWN:
 			if _state_t <= 0.0:
@@ -434,6 +459,31 @@ func player_can_act() -> bool:
 
 func player_can_walk() -> bool:
 	return player_can_act() or state == State.PLACING
+
+
+func overdrive_ready() -> bool:
+	return overdrive_charge >= GameData.OVERDRIVE_MAX and overdrive_t <= 0.0
+
+
+func overdrive_active() -> bool:
+	return overdrive_t > 0.0
+
+
+func activate_overdrive() -> bool:
+	if not overdrive_ready() or not player_can_act():
+		return false
+	overdrive_charge = 0.0
+	overdrive_t = GameData.OVERDRIVE_DURATION
+	hud.screen_flash(0.32, OVERDRIVE_COLOR)
+	add_shake(0.35)
+	fx.text(player.position + Vector2(0, -24), "火力全开！", OVERDRIVE_COLOR)
+	Sfx.play("overdrive" if Sfx._streams.has("overdrive") else "boss_phase")
+	Mobile.haptic_heavy()
+	if not Harness.automated():
+		Save.career["overdrives"] = int(Save.career["overdrives"]) + 1
+		if not Save.unlock_achievement("overdrive_go"):
+			Save.save_all()
+	return true
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +797,11 @@ func _most_damaged(structures: Array) -> Node2D:
 
 
 func _wave_cleared() -> void:
+	if not Harness.automated():
+		if wave >= 5:
+			Save.unlock_achievement("wave_5")
+		if endless and wave >= 20:
+			Save.unlock_achievement("endless_20")
 	events.on_wave_cleared()
 	bullets.clear_hazards()
 	hazards.clear()
@@ -925,6 +980,18 @@ func credit_kill(z: Variant, drops: bool) -> void:
 	combo += 1
 	combo_t = COMBO_WINDOW
 	best_combo = maxi(best_combo, combo)
+	if not overdrive_active():
+		var gained := 3.5 + minf(float(combo), 20.0) * 0.2
+		if z.is_boss:
+			gained += 18.0
+		overdrive_charge = minf(overdrive_charge + gained, GameData.OVERDRIVE_MAX)
+	if not Harness.automated():
+		Save.record_career_kill(z.is_boss)
+		Save.unlock_achievement("first_blood")
+		if combo >= 30:
+			Save.unlock_achievement("combo_30")
+		if kills >= 300:
+			Save.unlock_achievement("slayer_300")
 	if Sfx.has_method("play_kill"):
 		Sfx.call("play_kill", combo)
 	score += roundi(int(stat["score"]) * combo_multiplier())
@@ -1012,6 +1079,11 @@ func grant_ammo_box() -> void:
 
 func count_cue(text: String) -> void:
 	cue_stats[text] = int(cue_stats.get(text, 0)) + 1
+	if not Harness.automated():
+		if text == "淬火":
+			Save.unlock_achievement("quench_hit")
+		elif text == "碎冰":
+			Save.unlock_achievement("shatter_hit")
 
 
 func on_bullet_hit() -> void:
@@ -1079,6 +1151,18 @@ func _finish_game(reason: String) -> void:
 			Save.record_endless(wave)
 		result_rank = Save.submit(score, wave, kills, victory, danger, contracts, score_mult)
 	if not Harness.automated():
+		Save.record_career_run(victory, hero_id)
+		if daily_run:
+			Save.record_daily_score(daily_date, score)
+		if victory:
+			if boss_rush:
+				Save.unlock_achievement("boss_rush_clear")
+			else:
+				Save.unlock_achievement("first_clear")
+				if danger >= 3:
+					Save.unlock_achievement("danger_3")
+				if has_contract("no_turret"):
+					Save.unlock_achievement("no_turret_win")
 		Save.clear_resume_run()
 	Harness.on_game_over(self)
 
@@ -1203,6 +1287,8 @@ func shop_can_buy(item: Dictionary) -> bool:
 func shop_buy(id: String) -> bool:
 	if not Shop.buy(self, id):
 		return false
+	if id.begins_with("evo_") and not Harness.automated():
+		Save.unlock_achievement("evolve_one")
 	_save_resume_state()
 	return true
 
@@ -1262,6 +1348,8 @@ func try_place_turret(cell: int) -> bool:
 	spend_coins(cost)
 	Sfx.play("buy")
 	fx.dust(t.position, 8)
+	if turrets.size() >= 6 and not Harness.automated():
+		Save.unlock_achievement("turret_baron")
 	if state == State.PLACING:
 		cancel_turret_placement()
 	_save_resume_state()
