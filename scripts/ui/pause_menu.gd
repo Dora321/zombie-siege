@@ -9,6 +9,7 @@ var game: Node
 @onready var sfx_button: Button = %SfxButton
 @onready var shake_button: Button = %ShakeButton
 @onready var auto_aim_button: Button = %AutoAimButton
+@onready var auto_fire_button: Button = %AutoFireButton
 @onready var quit_button: Button = %QuitButton
 
 
@@ -23,6 +24,7 @@ func setup(g: Node) -> void:
 	sfx_button.pressed.connect(_toggle_sfx)
 	shake_button.pressed.connect(_toggle_shake)
 	auto_aim_button.pressed.connect(_toggle_auto_aim)
+	auto_fire_button.pressed.connect(_toggle_auto_fire)
 	_refresh_labels()
 
 
@@ -35,11 +37,12 @@ func open() -> void:
 	Engine.time_scale = 1.0
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var touch := Mobile.is_touch()
-	for b: Button in [resume_button, restart_button, music_button, sfx_button, shake_button, quit_button]:
-		b.focus_mode = Control.FOCUS_NONE if touch else Control.FOCUS_ALL
+	var touch_input := Mobile.show_touch_overlay()
+	for b: Button in [resume_button, restart_button, music_button, sfx_button, shake_button, auto_aim_button, auto_fire_button, quit_button]:
+		b.focus_mode = Control.FOCUS_NONE if touch_input else Control.FOCUS_ALL
 		b.custom_minimum_size.y = 22.0 if touch else 19.0
 	_refresh_labels()
-	if not touch:
+	if not touch_input:
 		resume_button.grab_focus()
 	Sfx.play("ui_click")
 
@@ -62,6 +65,8 @@ func _refresh_labels() -> void:
 	shake_button.text = "屏幕震动：" + ("开" if Save.shake_on else "关")
 	auto_aim_button.visible = Mobile.is_touch()
 	auto_aim_button.text = "自动瞄准：" + ("开" if Save.auto_aim_on else "关")
+	auto_fire_button.visible = Mobile.is_touch()
+	auto_fire_button.text = "自动开火：" + ("开" if Save.auto_fire_on else "关")
 
 
 func _toggle_music() -> void:
@@ -86,6 +91,13 @@ func _toggle_shake() -> void:
 
 func _toggle_auto_aim() -> void:
 	Save.auto_aim_on = not Save.auto_aim_on
+	Save.save_all()
+	Sfx.play("ui_click")
+	_refresh_labels()
+
+
+func _toggle_auto_fire() -> void:
+	Save.auto_fire_on = not Save.auto_fire_on
 	Save.save_all()
 	Sfx.play("ui_click")
 	_refresh_labels()

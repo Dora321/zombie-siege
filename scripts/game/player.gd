@@ -77,6 +77,8 @@ var _latch_item_next := false
 var _buff_tint := false
 var _aim_assist_offset := 0.0
 var _touch_fire_hold_t := 0.0
+var _minigun_spin := 0.0
+var _using_item := false
 var touch_lock_target: Node2D = null
 
 @onready var body: Sprite2D = $Body
@@ -112,6 +114,76 @@ func setup(g: Node, m: Node2D) -> void:
 
 func _refresh_stats(id: String) -> void:
 	stats[id] = GameData.weapon_stats(id, maxi(int(weapon_state[id]["level"]), 1))
+
+
+func export_run_state() -> Dictionary:
+	return {
+		"hp": hp, "max_hp": max_hp, "armor": armor,
+		"weapon_id": weapon_id, "weapon_slots": weapon_slots, "loadout": loadout.duplicate(),
+		"weapon_state": weapon_state.duplicate(true), "items": items.duplicate(true),
+		"used_items": used_items.duplicate(true), "selected_item": selected_item,
+		"dot_mult": dot_mult, "sticky_mult": sticky_mult, "status_bonus": status_bonus,
+		"blast_boss_mult": blast_boss_mult, "reflect_mult": reflect_mult,
+	}
+
+
+func import_run_state(d: Dictionary) -> void:
+	max_hp = maxf(_saved_number(d, "max_hp", max_hp), 1.0)
+	hp = clampf(_saved_number(d, "hp", hp), 0.0, max_hp)
+	armor = clampf(_saved_number(d, "armor", armor), 0.0, GameData.ARMOR_MAX)
+	weapon_slots = clampi(int(_saved_number(d, "weapon_slots", weapon_slots)), GameData.BASE_WEAPON_SLOTS, GameData.MAX_WEAPON_SLOTS)
+
+	var saved_weapons: Variant = d.get("weapon_state")
+	for id: String in GameData.WEAPON_ORDER:
+		if saved_weapons is Dictionary and saved_weapons.get(id) is Dictionary:
+			var st: Dictionary = weapon_state[id]
+			var saved: Dictionary = saved_weapons[id].duplicate(true)
+			saved["level"] = clampi(int(_saved_number(saved, "level", st["level"])), 1 if id == "pistol" else 0, GameData.MAX_WEAPON_LEVEL)
+			saved["mag"] = maxi(int(_saved_number(saved, "mag", st["mag"])), 0)
+			saved["reserve"] = maxi(int(_saved_number(saved, "reserve", st["reserve"])), -1)
+			var evo: Variant = saved.get("evo", "")
+			if not (evo is String and GameData.EVOLUTIONS.get(evo, {}).get("base") == id):
+				saved.erase("evo")
+			weapon_state[id] = saved
+		_refresh_stats(id)
+
+	var saved_loadout: Variant = d.get("loadout")
+	if not saved_loadout is Array:
+		saved_loadout = loadout.duplicate()
+	loadout.assign(["pistol"])
+	for id: Variant in saved_loadout:
+		if id is String and weapon_state.has(id) and owns_weapon(id) and not carries(id) and not loadout_full():
+			loadout.append(id)
+	var saved_weapon: Variant = d.get("weapon_id", weapon_id)
+	weapon_id = saved_weapon if saved_weapon is String and carries(saved_weapon) else "pistol"
+
+	var saved_items: Variant = d.get("items")
+	if saved_items is Dictionary:
+		for id: String in GameData.ITEM_ORDER:
+			items[id] = clampi(int(_saved_number(saved_items, id, items[id])), 0, int(GameData.ITEMS[id]["max"]))
+	var saved_used_items: Variant = d.get("used_items")
+	if saved_used_items is Dictionary:
+		used_items = saved_used_items.duplicate(true)
+	var saved_item: Variant = d.get("selected_item")
+	if saved_item is String and GameData.ITEMS.has(saved_item):
+		selected_item = saved_item
+	dot_mult = _saved_number(d, "dot_mult", dot_mult)
+	sticky_mult = _saved_number(d, "sticky_mult", sticky_mult)
+	status_bonus = _saved_number(d, "status_bonus", status_bonus)
+	blast_boss_mult = _saved_number(d, "blast_boss_mult", blast_boss_mult)
+	reflect_mult = _saved_number(d, "reflect_mult", reflect_mult)
+
+	alive = hp > 0.0
+	visible = alive
+	reload_t = 0.0
+	_set_gun_sprite()
+	_animate(0.0, Vector2.ZERO)
+	queue_redraw()
+
+
+func _saved_number(d: Dictionary, key: String, fallback: float) -> float:
+	var value: Variant = d.get(key)
+	return float(value) if (value is int or value is float) and is_finite(float(value)) else fallback
 
 
 func owns_weapon(id: String) -> bool:
@@ -232,6 +304,8 @@ func muzzle_pos() -> Vector2:
 ## 抛物线的落点：准星位置，超出射程就落在射程边缘。
 func lob_target(max_range: float) -> Vector2:
 	var hand := position + Vector2(0, -HAND_H)
+	if not _using_item and Mobile.is_touch() and Mobile.aiming:
+		return hand + aim * lerpf(minf(56.0, max_range), max_range, Mobile.aim_pull)
 	var to := aim_point - hand
 	if to.length() < 1.0:
 		to = aim
@@ -274,6 +348,8 @@ func _physics_process(dt: float) -> void:
 	var want_reload := false
 	var weapon_pick := -1
 	var item_pick := ""
+	var item_has_target := false
+	var item_target := Vector2.ZERO
 	if bot != null:
 		move_input = bot.move
 		aim = bot.aim_dir
@@ -291,10 +367,21 @@ func _physics_process(dt: float) -> void:
 		move_input = Input.get_vector("move_left", "move_right", "move_up", "move_down")
 		var touch := Mobile.is_touch()
 		var hand := position + Vector2(0, -HAND_H)
-		if touch:
+		firing = Input.is_action_pressed("fire")
+		if Mobile.gamepad_active:
+			touch_lock_target = null
+			_aim_assist_offset = 0.0
+			_touch_fire_hold_t = 0.0
+			if Mobile.gamepad_aim_vec.length_squared() > 0.01:
+				aim = Mobile.gamepad_aim_vec
+			elif move_input.length_squared() > 0.01:
+				_turn_aim_toward(move_input.normalized(), dt * 18.0)
+			aim_point = hand + aim * 120.0
+		elif touch:
 			_touch_fire_hold_t = maxf(_touch_fire_hold_t - dt, 0.0)
 			if Mobile.move_vec.length_squared() > 0.0001:
 				move_input = Mobile.move_vec
+			var auto_fire := Save.auto_fire_on and control and not Mobile.aiming and not Mobile.firing and not firing
 			if Mobile.aiming and Mobile.aim_vec.length_squared() > 0.01:
 				# 右摇杆拖动：360° 手动精准瞄准（开启自动瞄准时做轻微扇形磁吸）
 				aim = Mobile.aim_vec.normalized()
@@ -305,36 +392,30 @@ func _physics_process(dt: float) -> void:
 					touch_lock_target = null
 				aim_point = hand + aim * 120.0
 				_touch_fire_hold_t = 0.32
-			elif Mobile.firing:
-				# 点按/按住射击不拖动：自动锁定射程内最近可见敌人；无敌人时面向移动方向
-				_aim_assist_offset = 0.0
-				_touch_fire_hold_t = 0.32
-				var locked: Variant = _find_auto_lock_target(hand) if Save.auto_aim_on else null
-				touch_lock_target = locked
-				if locked != null:
-					var lock_pos: Vector2 = locked.center()
-					var to: Vector2 = lock_pos - hand
-					if to.length_squared() > 4.0:
-						aim = to.normalized()
-					aim_point = lock_pos
-				else:
-					if move_input.length_squared() > 0.01:
-						_turn_aim_toward(move_input.normalized(), dt * 18.0)
-					aim_point = hand + aim * 120.0
 			else:
-				# 仅左手移动：自然面向移动方向，并预览下一个自动锁定目标
+				# 未拖动右摇杆时，按住开火或开启自动开火都可以锁定目标。
 				_aim_assist_offset = 0.0
-				touch_lock_target = _find_auto_lock_target(hand) if Save.auto_aim_on else null
-				if move_input.length_squared() > 0.01 and _touch_fire_hold_t <= 0.0:
-					_turn_aim_toward(move_input.normalized(), dt * 18.0)
-				aim_point = hand + aim * 120.0
+				touch_lock_target = _find_auto_lock_target(hand, auto_fire) if Save.auto_aim_on or auto_fire else null
+				if touch_lock_target != null and (Mobile.firing or auto_fire):
+					aim_point = touch_lock_target.center()
+					var to := aim_point - hand
+					if to.length_squared() > (0.0 if auto_fire else 4.0):
+						aim = to.normalized()
+					_touch_fire_hold_t = 0.32
+					firing = true
+				else:
+					if move_input.length_squared() > 0.01 and (Mobile.firing or _touch_fire_hold_t <= 0.0):
+						_turn_aim_toward(move_input.normalized(), dt * 18.0)
+					if Mobile.firing:
+						_touch_fire_hold_t = 0.32
+					aim_point = hand + aim * 120.0
+			firing = firing or Mobile.firing
 		else:
 			touch_lock_target = null
 			var mouse := get_global_mouse_position()
 			aim_point = mouse
 			if mouse.distance_squared_to(hand) > 4.0:
 				aim = (mouse - hand).normalized()
-		firing = Input.is_action_pressed("fire") or (touch and Mobile.firing)
 		want_dash = _latch_dash
 		want_reload = _latch_reload
 		weapon_pick = _latch_weapon
@@ -360,12 +441,15 @@ func _physics_process(dt: float) -> void:
 				cycle_item()
 			if GameData.ITEMS.has(Mobile.latch_item_use):
 				item_pick = Mobile.latch_item_use
+				item_has_target = Mobile.latch_item_has_target
+				item_target = Mobile.latch_item_target
 			Mobile.latch_dash = false
 			Mobile.latch_reload = false
 			Mobile.latch_weapon_id = ""
 			Mobile.latch_weapon_step = 0
 			Mobile.latch_item_select = ""
 			Mobile.latch_item_use = ""
+			Mobile.latch_item_has_target = false
 			Mobile.latch_item_next = false
 
 	if not control:
@@ -385,7 +469,19 @@ func _physics_process(dt: float) -> void:
 	if want_dash:
 		_try_dash(move_input)
 	if item_pick != "":
+		var weapon_aim := aim
+		var weapon_aim_point := aim_point
+		if item_has_target:
+			aim_point = item_target
+			var to := aim_point - (position + Vector2(0, -HAND_H))
+			if to.length_squared() > 16.0:
+				aim = to.normalized()
 		use_item(item_pick)
+		# 同一帧还可能开火，投掷落点只对道具生效。
+		aim = weapon_aim
+		aim_point = weapon_aim_point
+	var spinning := firing and evolution(weapon_id) == "pulse_minigun" and reload_t <= 0.0 and dash_t <= 0.0 and (buff_ammo_t > 0.0 or int(weapon_state[weapon_id]["mag"]) > 0)
+	_minigun_spin = move_toward(_minigun_spin, 1.0 if spinning else 0.0, dt * (2.0 if spinning else 1.6))
 	if firing:
 		_try_fire()
 	_move(move_input, dt)
@@ -397,13 +493,15 @@ func _turn_aim_toward(target_dir: Vector2, weight: float) -> void:
 	aim = Vector2.from_angle(aim.angle() + diff * clampf(weight, 0.0, 1.0))
 
 
-func _find_auto_lock_target(hand: Vector2) -> Node2D:
+func _find_auto_lock_target(hand: Vector2, clear_only := false) -> Node2D:
 	var view := get_viewport_rect().grow(12.0)
 	var canvas := get_canvas_transform()
 	var best_clear: Node2D = null
 	var best_clear_score := INF
 	var best_any: Node2D = null
 	var best_any_score := INF
+	# 自动开火按子弹的地面投影检查遮挡。
+	var ground_offset := Vector2(0, HAND_H) if clear_only else Vector2.ZERO
 	var current_valid: bool = is_instance_valid(touch_lock_target) and not bool(touch_lock_target.get("dead")) and not touch_lock_target.cloaked() and not bool(touch_lock_target.get("burrowed"))
 	for z: Variant in game.zombies_near(hand, AUTO_LOCK_RANGE):
 		if z.dead or z.cloaked() or z.burrowed or not z.is_visible_in_tree():
@@ -413,11 +511,11 @@ func _find_auto_lock_target(hand: Vector2) -> Node2D:
 		if dist > AUTO_LOCK_RANGE or not view.has_point(canvas * target):
 			continue
 		var score := dist - (22.0 if current_valid and z == touch_lock_target else 0.0)
-		if map.line_clear(hand, target, map.BLOCK_BULLET):
+		if map.line_clear(hand + ground_offset, target + ground_offset, map.BLOCK_BULLET):
 			if score < best_clear_score:
 				best_clear_score = score
 				best_clear = z
-		elif score < best_any_score:
+		elif not clear_only and score < best_any_score:
 			best_any_score = score
 			best_any = z
 	return best_clear if best_clear != null else best_any
@@ -630,8 +728,12 @@ func _try_fire() -> void:
 	if not free_shot:
 		st["mag"] = int(st["mag"]) - 1
 	cooldown = float(s["cooldown"])
+	if evolution(weapon_id) == "pulse_minigun":
+		cooldown *= lerpf(1.0, 0.68, _minigun_spin)
 	var muzzle := muzzle_pos()
 	_fire_mode(s, muzzle, float(s["damage"]) * damage_mult())
+	if bot == null and weapon_id in ["shotgun", "sniper", "grenade"]:
+		Mobile.haptic_light()
 	if s.has("casing"):
 		game.fx.casing(position + Vector2(0, -HAND_H), aim, s["casing"] == "red")
 	game.add_shake(float(s["shake"]))
@@ -654,7 +756,10 @@ func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 		"beam":
 			game.ordnance.beam(muzzle, aim, float(s["range"]), damage, float(s["knock"]), int(s["pierce"]), evo == "puncturer")
 		"flame":
-			game.ordnance.flame(muzzle, aim, float(s["range"]), float(s["cone"]), damage)
+			if evo == "blue_furnace" and game.ordnance.has_method("flame_blue"):
+				game.ordnance.flame_blue(muzzle, aim, float(s["range"]) * 1.15, float(s["cone"]) * 1.1, damage * 1.2)
+			else:
+				game.ordnance.flame(muzzle, aim, float(s["range"]), float(s["cone"]), damage)
 		"lob":
 			game.ordnance.lob("thermite" if evo == "thermite" else "grenade", muzzle, lob_target(float(s["range"])), damage, float(s["radius"]))
 		"arc":
@@ -663,14 +768,32 @@ func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 			var saw := evo == "saw_rang"
 			game.ordnance.boomerang(muzzle, aim, float(s["speed"]), float(s["range"]), damage * (GameData.SAW_MULT if saw else 1.0), float(s["knock"]), saw)
 		_:
+			var knock := float(s["knock"])
+			var life := float(s["life"])
+			var pierce := int(s["pierce"])
+			if evo == "twin_handgun":
+				var offset := aim.orthogonal() * 2.5
+				var shot_velocity := aim * float(s["speed"]) * randf_range(0.92, 1.05)
+				for side: float in [-1.0, 1.0]:
+					game.bullets.fire(muzzle + offset * side, shot_velocity, damage * 1.25, knock, life, pierce + 1, Color("#ffe870"), true)
+				return
+			var color := Color(String(s["color"]))
+			var dragon := evo == "dragon_breath"
+			if dragon:
+				knock *= 1.25
+				color = Color("#ff7830")
+			elif evo == "pulse_minigun":
+				knock *= 1.4
 			var spread := deg_to_rad(float(s["spread"]))
 			for i in int(s["pellets"]):
 				var d := aim.rotated(randf_range(-spread, spread))
 				var bullet_speed := float(s["speed"]) * randf_range(0.92, 1.05)
-				var b: Variant = game.bullets.fire(muzzle, d * bullet_speed, damage, float(s["knock"]), float(s["life"]), int(s["pierce"]), Color(String(s["color"])), true)
+				var b: Variant = game.bullets.fire(muzzle, d * bullet_speed, damage, knock, life, pierce, color, true)
 				b.chill = float(s.get("chill", 0.0))
 				b.buckshot = int(s["pellets"]) > 1
 				b.mine = evo == "frost_mine"
+				if dragon and "burn" in b:
+					b.burn = true
 
 
 ## 回旋镖飞回手里。
@@ -690,7 +813,10 @@ func use_item(id: String) -> bool:
 			game.fx.text(position + Vector2(0, -22), "没有%s" % GameData.ITEMS[id]["name"] if id != "" else "没有道具", Color("#ff8060"))
 			Sfx.play("deny")
 		return false
-	if not game.ordnance.use_item(id, self):
+	_using_item = true
+	var applied: bool = game.ordnance.use_item(id, self)
+	_using_item = false
+	if not applied:
 		Sfx.play("deny")
 		return false
 	items[id] = int(items[id]) - 1
@@ -751,7 +877,7 @@ func _try_dash(move_input: Vector2) -> void:
 	Sfx.play("dash")
 	game.fx.dust(position, 6)
 	if bot == null and Mobile.is_touch():
-		Mobile.trigger_haptic(12, 0.3)
+		Mobile.haptic_medium()
 
 
 func take_damage(amount: float, attacker_pos: Variant = null) -> void:
@@ -767,7 +893,7 @@ func take_damage(amount: float, attacker_pos: Variant = null) -> void:
 		_knock += (position - from).normalized() * 150.0
 	game.on_player_hurt(amount)
 	if bot == null and Mobile.is_touch():
-		Mobile.trigger_haptic(25, 0.7)
+		Mobile.haptic_heavy()
 	game.fx.blood_hit(position + Vector2(0, -7), Vector2.UP, 6, Color("#a01c1c"))
 	if hp <= 0.0:
 		hp = 0.0

@@ -79,6 +79,14 @@ layout_mode = 2
 focus_mode = 0
 text = "自动瞄准：开"
 
+[node name="AutoFireButton" type="Button" parent="Panel/VBox"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(120, 22)
+layout_mode = 2
+focus_mode = 0
+text = "自动开火：关"
+
 [node name="QuitButton" type="Button" parent="Panel/VBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
