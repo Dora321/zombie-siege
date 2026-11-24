@@ -14,7 +14,23 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
 
-[node name="Menu" type="VBoxContainer" parent="."]
+[node name="Content" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -240.0
+offset_top = -135.0
+offset_right = 240.0
+offset_bottom = 135.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Menu" type="VBoxContainer" parent="Content"]
 layout_mode = 0
 offset_left = 60.0
 offset_top = 100.0
@@ -22,49 +38,50 @@ offset_right = 200.0
 offset_bottom = 230.0
 theme_override_constants/separation = 5
 
-[node name="StartButton" type="Button" parent="Menu"]
+[node name="StartButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "开始游戏"
 
-[node name="HelpButton" type="Button" parent="Menu"]
+[node name="HelpButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "操作说明"
 
-[node name="BestiaryButton" type="Button" parent="Menu"]
+[node name="BestiaryButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "僵尸图鉴"
 
-[node name="ClearButton" type="Button" parent="Menu"]
+[node name="ClearButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "清除记录"
 
-[node name="QuitButton" type="Button" parent="Menu"]
+[node name="QuitButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "退出游戏"
 
-[node name="ScoresPanel" type="PanelContainer" parent="."]
+[node name="ScoresPanel" type="PanelContainer" parent="Content"]
 layout_mode = 0
 offset_left = 232.0
 offset_top = 104.0
 offset_right = 450.0
 offset_bottom = 214.0
 
-[node name="ScoresLabel" type="Label" parent="ScoresPanel"]
+[node name="ScoresLabel" type="Label" parent="Content/ScoresPanel"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 12
 
-[node name="Hint" type="Label" parent="."]
+[node name="Hint" type="Label" parent="Content"]
+unique_name_in_owner = true
 layout_mode = 0
 offset_left = 0.0
 offset_top = 250.0
@@ -75,7 +92,7 @@ theme_override_font_sizes/font_size = 12
 text = "守住基地，撑过 15 波尸潮"
 horizontal_alignment = 1
 
-[node name="HelpPanel" type="PanelContainer" parent="."]
+[node name="HelpPanel" type="PanelContainer" parent="Content"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 0
@@ -84,17 +101,18 @@ offset_top = 16.0
 offset_right = 430.0
 offset_bottom = 254.0
 
-[node name="VBox" type="VBoxContainer" parent="HelpPanel"]
+[node name="VBox" type="VBoxContainer" parent="Content/HelpPanel"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="HelpTitle" type="Label" parent="HelpPanel/VBox"]
+[node name="HelpTitle" type="Label" parent="Content/HelpPanel/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.82, 0.45, 1)
 text = "操作说明"
 horizontal_alignment = 1
 
-[node name="HelpText" type="Label" parent="HelpPanel/VBox"]
+[node name="HelpText" type="Label" parent="Content/HelpPanel/VBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_font_sizes/font_size = 12
@@ -112,13 +130,13 @@ Esc 或 P 暂停    F11 或 F 全屏
 天气和空投等随机事件看屏幕提示和右上角标签
 精英的克制办法见标题界面的「僵尸图鉴」"
 
-[node name="HelpClose" type="Button" parent="HelpPanel/VBox"]
+[node name="HelpClose" type="Button" parent="Content/HelpPanel/VBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 20)
 layout_mode = 2
 text = "知道了"
 
-[node name="BestiaryPanel" type="Control" parent="."]
+[node name="BestiaryPanel" type="Control" parent="Content"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 0
@@ -128,7 +146,7 @@ offset_right = 466.0
 offset_bottom = 264.0
 script = ExtResource("2")
 
-[node name="Buttons" type="HBoxContainer" parent="BestiaryPanel"]
+[node name="Buttons" type="HBoxContainer" parent="Content/BestiaryPanel"]
 layout_mode = 0
 offset_left = 110.0
 offset_top = 234.0
@@ -136,25 +154,25 @@ offset_right = 342.0
 offset_bottom = 254.0
 theme_override_constants/separation = 6
 
-[node name="BestiaryPrev" type="Button" parent="BestiaryPanel/Buttons"]
+[node name="BestiaryPrev" type="Button" parent="Content/BestiaryPanel/Buttons"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 text = "上一页"
 
-[node name="BestiaryNext" type="Button" parent="BestiaryPanel/Buttons"]
+[node name="BestiaryNext" type="Button" parent="Content/BestiaryPanel/Buttons"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 text = "下一页"
 
-[node name="BestiaryClose" type="Button" parent="BestiaryPanel/Buttons"]
+[node name="BestiaryClose" type="Button" parent="Content/BestiaryPanel/Buttons"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 text = "关闭"
 
-[node name="MapPanel" type="Control" parent="."]
+[node name="MapPanel" type="Control" parent="Content"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 0
@@ -164,7 +182,7 @@ offset_right = 466.0
 offset_bottom = 264.0
 script = ExtResource("3")
 
-[node name="MapBack" type="Button" parent="MapPanel"]
+[node name="MapBack" type="Button" parent="Content/MapPanel"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 0
@@ -174,7 +192,7 @@ offset_right = 262.0
 offset_bottom = 252.0
 text = "返回"
 
-[node name="PrepPanel" type="Control" parent="."]
+[node name="PrepPanel" type="Control" parent="Content"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 0
@@ -184,7 +202,7 @@ offset_right = 466.0
 offset_bottom = 264.0
 script = ExtResource("4")
 
-[node name="PrepBack" type="Button" parent="PrepPanel"]
+[node name="PrepBack" type="Button" parent="Content/PrepPanel"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 0
@@ -194,7 +212,7 @@ offset_right = 212.0
 offset_bottom = 252.0
 text = "返回"
 
-[node name="PrepGo" type="Button" parent="PrepPanel"]
+[node name="PrepGo" type="Button" parent="Content/PrepPanel"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 0
@@ -207,27 +225,36 @@ text = "开始行动"
 [node name="ClickGate" type="ColorRect" parent="."]
 unique_name_in_owner = true
 visible = false
-layout_mode = 0
-offset_right = 480.0
-offset_bottom = 270.0
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 color = Color(0.05, 0.03, 0.06, 0.93)
 
 [node name="ClickLabel" type="Label" parent="ClickGate"]
 unique_name_in_owner = true
-layout_mode = 0
-offset_top = 118.0
-offset_right = 480.0
-offset_bottom = 142.0
+layout_mode = 1
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = -17.0
+offset_bottom = 7.0
+mouse_filter = 2
 theme_override_colors/font_color = Color(1, 0.82, 0.45, 1)
 theme_override_font_sizes/font_size = 24
 text = "点击开始"
 horizontal_alignment = 1
 
 [node name="ClickHint" type="Label" parent="ClickGate"]
-layout_mode = 0
-offset_top = 148.0
-offset_right = 480.0
-offset_bottom = 162.0
+layout_mode = 1
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = 13.0
+offset_bottom = 27.0
+mouse_filter = 2
 theme_override_colors/font_color = Color(0.75, 0.73, 0.68, 1)
 text = "浏览器要求先点击一次才能播放声音，按 F 键可全屏"
 horizontal_alignment = 1

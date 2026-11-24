@@ -29,13 +29,18 @@ func _ready() -> void:
 	next_button.pressed.connect(func(): turn(1))
 	close_button.pressed.connect(close)
 	for b: Button in [prev_button, next_button, close_button]:
-		b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
+		if Mobile.is_touch():
+			b.focus_mode = Control.FOCUS_NONE
+			b.custom_minimum_size.y = 22.0
+		else:
+			b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
 
 
 func open() -> void:
 	visible = true
 	page = 0
-	close_button.grab_focus()
+	if not Mobile.is_touch():
+		close_button.grab_focus()
 	queue_redraw()
 
 

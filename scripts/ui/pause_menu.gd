@@ -8,6 +8,7 @@ var game: Node
 @onready var music_button: Button = %MusicButton
 @onready var sfx_button: Button = %SfxButton
 @onready var shake_button: Button = %ShakeButton
+@onready var auto_aim_button: Button = %AutoAimButton
 @onready var quit_button: Button = %QuitButton
 
 
@@ -21,18 +22,25 @@ func setup(g: Node) -> void:
 	music_button.pressed.connect(_toggle_music)
 	sfx_button.pressed.connect(_toggle_sfx)
 	shake_button.pressed.connect(_toggle_shake)
+	auto_aim_button.pressed.connect(_toggle_auto_aim)
 	_refresh_labels()
 
 
 func open() -> void:
 	if get_tree().paused:
 		return
+	Mobile.clear_controls()
 	visible = true
 	get_tree().paused = true
 	Engine.time_scale = 1.0
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var touch := Mobile.is_touch()
+	for b: Button in [resume_button, restart_button, music_button, sfx_button, shake_button, quit_button]:
+		b.focus_mode = Control.FOCUS_NONE if touch else Control.FOCUS_ALL
+		b.custom_minimum_size.y = 22.0 if touch else 19.0
 	_refresh_labels()
-	resume_button.grab_focus()
+	if not touch:
+		resume_button.grab_focus()
 	Sfx.play("ui_click")
 
 
@@ -52,6 +60,8 @@ func _refresh_labels() -> void:
 	music_button.text = "音乐：" + ("开" if Save.music_on else "关")
 	sfx_button.text = "音效：" + ("开" if Save.sfx_on else "关")
 	shake_button.text = "屏幕震动：" + ("开" if Save.shake_on else "关")
+	auto_aim_button.visible = Mobile.is_touch()
+	auto_aim_button.text = "自动瞄准：" + ("开" if Save.auto_aim_on else "关")
 
 
 func _toggle_music() -> void:
@@ -71,6 +81,13 @@ func _toggle_sfx() -> void:
 func _toggle_shake() -> void:
 	Save.shake_on = not Save.shake_on
 	Save.save_all()
+	_refresh_labels()
+
+
+func _toggle_auto_aim() -> void:
+	Save.auto_aim_on = not Save.auto_aim_on
+	Save.save_all()
+	Sfx.play("ui_click")
 	_refresh_labels()
 
 

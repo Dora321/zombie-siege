@@ -2,7 +2,17 @@ extends Control
 ## 标题菜单：动态背景（僵尸列队走向围墙）、开始游戏、操作说明、排行榜。
 
 const KINDS: Array[String] = ["walker", "walker", "runner", "walker", "spitter", "exploder", "tank", "walker", "runner", "shielder", "splitter", "screamer", "summoner", "balloon"]
+const TOUCH_HELP := """左摇移动，右摇瞄准并开火
+右侧按钮：冲刺、换弹、使用道具
+点击武器栏换枪，点击道具栏选择或使用
+点击右上角暂停
+炮塔放置：点击或拖动选格，左摇移动，确认或取消
 
+目标：守住基地，撑过 15 波即胜利
+波次之间可在商店买武器、道具和炮塔
+精英的克制办法见「僵尸图鉴」"""
+
+@onready var content: Control = %Content
 @onready var start_button: Button = %StartButton
 @onready var help_button: Button = %HelpButton
 @onready var bestiary_button: Button = %BestiaryButton
@@ -12,7 +22,9 @@ const KINDS: Array[String] = ["walker", "walker", "runner", "walker", "spitter",
 @onready var clear_button: Button = %ClearButton
 @onready var quit_button: Button = %QuitButton
 @onready var help_panel: Control = %HelpPanel
+@onready var help_text: Label = %HelpText
 @onready var help_close: Button = %HelpClose
+@onready var hint: Label = %Hint
 @onready var scores_label: Label = %ScoresLabel
 @onready var click_gate: Control = %ClickGate
 @onready var click_label: Label = %ClickLabel
@@ -34,12 +46,12 @@ func _ready() -> void:
 	for i in _bg_map.size():
 		_bg_map[i] = randi() % _bg_tiles.size()
 	for i in 12:
-		_walkers.append(_new_walker(randf_range(-20, 500)))
+		_walkers.append(_new_walker(randf_range(-20.0, size.x + 20.0)))
 	start_button.pressed.connect(_on_start)
 	help_button.pressed.connect(_on_help)
 	bestiary_button.pressed.connect(_on_bestiary)
-	bestiary_panel.closed.connect(func(): start_button.grab_focus())
-	map_panel.closed.connect(func(): start_button.grab_focus())
+	bestiary_panel.closed.connect(_focus_start)
+	map_panel.closed.connect(_focus_start)
 	map_panel.chosen.connect(_on_map_chosen)
 	prep_panel.closed.connect(func(): map_panel.open())
 	prep_panel.confirmed.connect(func(): start_game(Save.map_id))
@@ -48,14 +60,24 @@ func _ready() -> void:
 	help_close.pressed.connect(func():
 		help_panel.visible = false
 		Sfx.play("ui_click")
-		start_button.grab_focus())
+		_focus_start())
+	var touch := Mobile.is_touch()
 	for b: Button in [start_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
-		b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
+		if touch:
+			b.focus_mode = Control.FOCUS_NONE
+			b.custom_minimum_size.y = 22.0
+		else:
+			b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
+	if touch:
+		help_text.text = TOUCH_HELP
+		hint.position.y -= 4.0
 	help_panel.visible = false
-	if OS.has_feature("web"):
+	if OS.has_feature("web") or Mobile.is_ios():
 		quit_button.visible = false
+	resized.connect(_fit_content)
+	_fit_content()
 	_refresh_scores()
-	start_button.grab_focus()
+	_focus_start()
 	if Sfx.audio_unlocked:
 		Sfx.play_music("menu")
 	else:
@@ -63,12 +85,41 @@ func _ready() -> void:
 	Harness.on_title_ready(self)
 
 
+func _fit_content() -> void:
+	var inset := Mobile.safe_insets(get_viewport())
+	var top: float = inset["top"]
+	var bottom: float = inset["bottom"]
+	var available_height := size.y - top - bottom
+	var available_width := size.x - 2.0 * maxf(inset["left"], inset["right"])
+	# 面板四周的留白可延伸到安全区外，内容仍保持在屏幕中央。
+	var fit := minf(available_width / (content.size.x - 28.0), available_height / (content.size.y - 12.0))
+	var half_height := content.size.y * 0.5
+	content.pivot_offset = content.size * 0.5
+	content.scale = Vector2.ONE * clampf(fit, 0.1, 1.0)
+	var shift := (top - bottom) * 0.5
+	content.offset_top = -half_height + shift
+	content.offset_bottom = half_height + shift
+
+
+func _focus_start() -> void:
+	if not Mobile.is_touch():
+		start_button.grab_focus()
+
+
 ## 网页版的第一次点击或按键只用来解锁音频，不触发下面的菜单。
 func _input(event: InputEvent) -> void:
 	if not click_gate.visible:
 		return
-	if (event is InputEventMouseButton or event is InputEventKey) and event.is_pressed():
-		get_viewport().set_input_as_handled()
+	var unlock := false
+	if event is InputEventScreenTouch:
+		# 等手指抬起，拦住同一次点按生成的鼠标事件。
+		unlock = not event.pressed and not event.canceled
+	elif (event is InputEventMouseButton or event is InputEventKey) and event.is_pressed():
+		unlock = event.device != InputEvent.DEVICE_ID_EMULATION
+	else:
+		return
+	get_viewport().set_input_as_handled()
+	if unlock:
 		click_gate.visible = false
 		Sfx.audio_unlocked = true
 		Sfx.play_music("menu")
@@ -118,7 +169,8 @@ func start_game(id: String) -> void:
 func _on_help() -> void:
 	Sfx.play("ui_click")
 	help_panel.visible = true
-	help_close.grab_focus()
+	if not Mobile.is_touch():
+		help_close.grab_focus()
 
 
 func _on_bestiary() -> void:
@@ -144,7 +196,7 @@ func _process(dt: float) -> void:
 	for w: Dictionary in _walkers:
 		w["x"] = float(w["x"]) + float(w["speed"]) * dt
 		w["t"] = float(w["t"]) + float(w["speed"]) * dt * 0.2
-		if float(w["x"]) > 500.0:
+		if float(w["x"]) > size.x + 20.0:
 			w["x"] = -24.0
 			w["y"] = randf_range(150, 262)
 	_walkers.sort_custom(func(a, b): return float(a["y"]) < float(b["y"]))
@@ -152,34 +204,57 @@ func _process(dt: float) -> void:
 
 
 func _draw() -> void:
-	for y in 18:
-		for x in 31:
-			draw_texture(_bg_tiles[_bg_map[y * 31 + x]], Vector2(x * 16, y * 16))
-	# 一条路
-	draw_rect(Rect2(0, 200, 480, 40), Color("#3c3e46"))
-	draw_rect(Rect2(0, 199, 480, 2), Color("#8a887e"))
-	draw_rect(Rect2(0, 239, 480, 2), Color("#8a887e"))
-	for x in range(((int(_time * 8.0)) % 28) - 28, 480, 28):
-		draw_rect(Rect2(x, 219, 14, 2), Color("#d8c860"))
+	var width := size.x
+	var road_y := size.y - 70.0
+	var horizon := road_y - 50.0
+	var expanded := Mobile.use_expanded_viewport()
+	var first_row := maxi(0, floori(horizon / 16.0)) if expanded else 0
+	for y in range(first_row, ceili(size.y / 16.0)):
+		for x in ceili(width / 16.0):
+			draw_texture(_bg_tiles[_bg_map[(y % 18) * 31 + x % 31]], Vector2(x * 16, y * 16))
+	if expanded:
+		_draw_skyline(width, horizon)
+	draw_rect(Rect2(0, road_y, width, 40), Color("#3c3e46"))
+	draw_rect(Rect2(0, road_y - 1, width, 2), Color("#8a887e"))
+	draw_rect(Rect2(0, road_y + 39, width, 2), Color("#8a887e"))
+	for x in range(((int(_time * 8.0)) % 28) - 28, ceili(width), 28):
+		draw_rect(Rect2(x, road_y + 19, 14, 2), Color("#d8c860"))
 	for w: Dictionary in _walkers:
 		var kind: String = w["kind"]
-		var size := Art.char_size(kind)
+		var char_size := Art.char_size(kind)
 		var tex := Art.frame(kind, Art.DIR_SIDE, int(w["t"]) % Art.FRAMES)
-		var pos := Vector2(roundf(float(w["x"])) - size.x / 2, roundf(float(w["y"])) - size.y)
+		var pos := Vector2(roundf(float(w["x"])) - char_size.x / 2, roundf(float(w["y"]) + road_y - 200.0) - char_size.y)
 		draw_texture(tex, pos)
 	# 压暗，突出前景文字
-	draw_rect(Rect2(0, 0, 480, 270), Color(0.05, 0.03, 0.06, 0.45))
+	draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.03, 0.06, 0.45))
+	_draw_heading()
+
+
+func _draw_skyline(width: float, horizon: float) -> void:
+	draw_rect(Rect2(0, 0, width, horizon), Color("#343044"))
+	draw_rect(Rect2(0, horizon - 42, width, 42), Color("#504052"))
+	for x in range(0, ceili(width), 48):
+		var height := 28 + (x / 48 * 13) % 33
+		draw_rect(Rect2(x, horizon - height, 41, height), Color("#2d2b37"))
+		draw_rect(Rect2(x + 4, horizon - height - 5, 30, 5), Color("#2d2b37"))
+		draw_rect(Rect2(x + 8, horizon - height + 7, 3, 5), Color("#6f5447"))
+		draw_rect(Rect2(x + 24, horizon - height + 7, 3, 5), Color("#494052"))
+	draw_rect(Rect2(0, horizon - 2, width, 2), Color("#242631"))
+
+
+func _draw_heading() -> void:
 	# 标题：12px 像素字放大 4 倍
 	var pulse := sin(_time * 3.0) * 0.5 + 0.5
 	var title := "僵尸围城"
-	var size := 12
+	var font_size := 12
 	var ci := get_canvas_item()
 	var tf: Font = Art.font
-	var width := tf.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	var at := Vector2(roundf(60.0 - width * 0.5), 4.0 + tf.get_ascent(size))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(4, 4))
-	tf.draw_string(ci, at + Vector2(0.75, 0.75), title, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0.08, 0.02, 0.03))
-	tf.draw_string(ci, at + Vector2(0.25, 0.25), title, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0.3, 0.04, 0.05))
-	tf.draw_string(ci, at, title, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0.95, 0.22 + pulse * 0.12, 0.14))
+	var width := tf.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var at := Vector2(roundf(60.0 - width * 0.5), 4.0 + tf.get_ascent(font_size))
+	var layout := content.get_transform()
+	draw_set_transform(layout.origin, 0.0, 4.0 * content.scale)
+	tf.draw_string(ci, at + Vector2(0.75, 0.75), title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.08, 0.02, 0.03))
+	tf.draw_string(ci, at + Vector2(0.25, 0.25), title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.3, 0.04, 0.05))
+	tf.draw_string(ci, at, title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.95, 0.22 + pulse * 0.12, 0.14))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	Art.draw_text(self, "ZOMBIE  SIEGE", Vector2(240, 80), 12, Color("#c8c4b8"), 1)
+	Art.draw_text(self, "ZOMBIE  SIEGE", layout * Vector2(240, 80), 12, Color("#c8c4b8"), 1)
