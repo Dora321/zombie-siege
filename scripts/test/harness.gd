@@ -2613,7 +2613,7 @@ func _arena_evolutions(g: Variant) -> void:
 	var bases: Array[String] = []
 	for evo: String in GameData.EVOLUTIONS.keys():
 		bases.append(String(GameData.EVOLUTIONS[evo]["base"]))
-	_check(bases.size() >= 4 and GameData.evolution_of("pistol") == "", "进化配方 %d 条，手枪没有进化" % bases.size())
+	_check(bases.size() == GameData.WEAPON_ORDER.size() and GameData.evolution_of("pistol") == "twin_handgun", "全部 %d 把武器都有进化配方" % bases.size())
 	# 没满级不出现进化
 	_check(_shop_row(g, "evo_cryo").is_empty(), "没满级的枪商店里没有进化")
 	for id: String in bases:
