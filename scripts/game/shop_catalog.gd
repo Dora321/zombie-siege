@@ -10,10 +10,27 @@ const TAB_ITEM := 4
 const MAX_TURRETS := 8
 const MAX_TURRET_LEVEL := 4
 const MAX_WALL_TIER := 4
+const TURRET_COST_STEP := 50
 
 
 static func turret_cost(g: Node) -> int:
-	return 110 + g.turrets.size() * 50
+	return 110 + g.turrets.size() * TURRET_COST_STEP
+
+
+static func _scaled_turret_cost(g: Node, kind: String, base_cost: int) -> int:
+	var spec: Dictionary = GameData.TURRET_TYPES[kind]
+	var discount := 0.75 if g.get("hero_id") == "engineer" else 1.0
+	return roundi(base_cost * float(spec["cost_mult"]) * discount)
+
+
+static func _turret_refund(g: Node) -> int:
+	if g.has_method("last_turret_refund"):
+		return g.last_turret_refund()
+	if g.turrets.is_empty():
+		return 0
+	var t: Variant = g.turrets.back()
+	var kind: String = t.turret_type if "turret_type" in t else "mg"
+	return floori(_scaled_turret_cost(g, kind, turret_cost(g) - TURRET_COST_STEP) * 0.6)
 
 
 static func items(g: Node) -> Array:
@@ -104,26 +121,37 @@ static func items(g: Node) -> Array:
 		"desc": "基地 %d/%d" % [roundi(g.base.hp), roundi(g.base.max_hp)],
 		"cost": 75, "locked": base_missing < 1.0,
 	})
-	var maxed_turrets: bool = g.turrets.size() >= MAX_TURRETS
-	var turret := {
-		"id": "turret", "tab": TAB_DEFENSE, "name": "放置炮塔 %d/%d" % [g.turrets.size(), MAX_TURRETS],
-		"desc": "已达上限" if maxed_turrets else "点地面放置",
-		"cost": 0 if maxed_turrets else turret_cost(g), "locked": maxed_turrets,
-	}
+	var max_turrets := int(g.turret_max_count()) if g.has_method("turret_max_count") else MAX_TURRETS
+	var turret_count: int = g.turrets.size()
+	var maxed_turrets := turret_count >= max_turrets
+	var no_turret: bool = g.has_contract("no_turret")
+	var base_cost := turret_cost(g)
+	for kind: String in GameData.TURRET_ORDER:
+		# 旧的放置流程只会造机枪炮塔。
+		if kind != "mg" and not ("placing_turret_kind" in g):
+			continue
+		var spec: Dictionary = GameData.TURRET_TYPES[kind]
+		var cost := int(g.turret_cost_for(kind)) if g.has_method("turret_cost_for") else _scaled_turret_cost(g, kind, base_cost)
+		out.append({
+			"id": "turret" if kind == "mg" else "turret_" + kind, "tab": TAB_DEFENSE,
+			"name": "%s %d/%d" % [spec["name"], turret_count, max_turrets],
+			"desc": "契约：本局不能放炮塔" if no_turret else ("已达上限" if maxed_turrets else String(spec["desc"])),
+			"cost": 0 if maxed_turrets else cost, "locked": no_turret or maxed_turrets,
+			"locked_text": "禁用" if no_turret else "--", "turret_kind": kind,
+		})
+	if turret_count > 0 and not no_turret:
+		var refund := _turret_refund(g)
+		out.append({
+			"id": "turret_sell", "tab": TAB_DEFENSE, "name": "拆除最新炮塔",
+			"desc": "+%d 金币" % refund, "cost": 0, "locked": false, "button": "拆除 +%d" % refund,
+		})
 	var tlvl: int = g.turret_level
-	var turret_up := {
+	out.append({
 		"id": "turret_up", "tab": TAB_DEFENSE, "name": "升级炮塔 Lv%d" % tlvl,
-		"desc": "已满级" if tlvl >= MAX_TURRET_LEVEL else "伤害射速射程提升",
-		"cost": 0 if tlvl >= MAX_TURRET_LEVEL else 140 * tlvl, "locked": tlvl >= MAX_TURRET_LEVEL,
-	}
-	# 禁炮塔契约：放置和升级都禁用
-	if g.has_contract("no_turret"):
-		for it: Dictionary in [turret, turret_up]:
-			it["locked"] = true
-			it["desc"] = "契约：本局不能放炮塔"
-			it["locked_text"] = "禁用"
-	out.append(turret)
-	out.append(turret_up)
+		"desc": "契约：本局不能放炮塔" if no_turret else ("已满级" if tlvl >= MAX_TURRET_LEVEL else "伤害射速射程提升"),
+		"cost": 0 if tlvl >= MAX_TURRET_LEVEL else 140 * tlvl,
+		"locked": no_turret or tlvl >= MAX_TURRET_LEVEL, "locked_text": "禁用" if no_turret else "--",
+	})
 	# 补给
 	out.append({
 		"id": "heal", "tab": TAB_SUPPLY, "name": "急救包 +50",
@@ -176,7 +204,8 @@ static func items(g: Node) -> Array:
 
 static func _repair_full_cost(g: Node) -> int:
 	var missing: float = g.map.missing_wall_hp()
-	return ceili(missing * 0.3) if missing >= 1.0 else 0
+	var rate := 0.18 if g.get("hero_id") == "engineer" else 0.3
+	return ceili(missing * rate) if missing >= 1.0 else 0
 
 
 static func can_buy(g: Node, item: Dictionary) -> bool:
@@ -200,6 +229,11 @@ static func buy(g: Node, id: String) -> bool:
 			item = it
 	if item.is_empty() or not can_buy(g, item):
 		return false
+	if item.has("turret_kind"):
+		if "placing_turret_kind" in g:
+			g.placing_turret_kind = String(item["turret_kind"])
+		g.begin_turret_placement()
+		return true
 	var cost: int = item["cost"]
 	var p: Variant = g.player
 	if id.begins_with("up_"):
@@ -224,8 +258,16 @@ static func buy(g: Node, id: String) -> bool:
 				g.map.raise_wall_tier()
 			"base_repair":
 				g.base.heal(150.0)
-			"turret":
-				g.begin_turret_placement()
+			"turret_sell":
+				if g.has_method("sell_last_turret"):
+					return g.sell_last_turret()
+				var refund := _turret_refund(g)
+				var t: Variant = g.turrets.pop_back()
+				g.map.clear_structure(t.cell)
+				t.alive = false
+				t.set_physics_process(false)
+				t.queue_free()
+				g.coins += refund
 				return true
 			"turret_up":
 				g.turret_level += 1

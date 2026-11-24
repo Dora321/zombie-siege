@@ -139,12 +139,11 @@ func _make_row(item: Dictionary) -> Control:
 	var buy := Button.new()
 	_fit_product_button(buy, 66.0)
 	var id := String(item["id"])
+	buy.disabled = not game.shop_can_buy(item)
 	if bool(item["locked"]):
 		buy.text = String(item.get("locked_text", "--"))
-		buy.disabled = true
 	else:
 		buy.text = String(item.get("button", "%d 金币" % int(item["cost"])))
-		buy.disabled = not game.shop_can_buy(item)
 		buy.pressed.connect(_on_buy.bind(id))
 		if not _touch:
 			buy.mouse_entered.connect(func(): Sfx.play("ui_hover"))
