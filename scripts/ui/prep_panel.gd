@@ -16,6 +16,8 @@ var picked: Array[String] = []
 var danger_buttons: Array[Button] = []
 var contract_buttons := {}
 var _map_id := "ruins"
+var _row_height := ROW_H
+var _touch := false
 
 @onready var back_button: Button = %PrepBack
 @onready var go_button: Button = %PrepGo
@@ -23,20 +25,30 @@ var _map_id := "ruins"
 
 func _ready() -> void:
 	visible = false
+	_touch = Mobile.is_touch()
+	_row_height = 24.0 if _touch else ROW_H
+	var danger_spacing := 32.0 if _touch else 30.0
+	var danger_size := Vector2(28, 22) if _touch else Vector2(26, 18)
+	var contract_size := Vector2(84, 21) if _touch else Vector2(84, 18)
 	for d in GameData.MAX_DANGER + 1:
-		var b := _make_button(str(d), Vector2(DANGER_X + d * 30, DANGER_TOP), Vector2(26, 18))
+		var b := _make_button(str(d), Vector2(DANGER_X + d * danger_spacing, DANGER_TOP), danger_size)
 		b.pressed.connect(set_danger.bind(d))
 		danger_buttons.append(b)
 	for i in GameData.CONTRACT_ORDER.size():
 		var id: String = GameData.CONTRACT_ORDER[i]
-		var b := _make_button(String(GameData.CONTRACTS[id]["name"]), Vector2(14, CONTRACT_TOP + i * ROW_H), Vector2(84, 18))
+		var b := _make_button(String(GameData.CONTRACTS[id]["name"]), Vector2(14, CONTRACT_TOP + i * _row_height), contract_size)
 		b.pressed.connect(toggle_contract.bind(id))
 		contract_buttons[id] = b
 	back_button.pressed.connect(close)
 	go_button.pressed.connect(confirm)
 	for b: Button in [back_button, go_button]:
-		b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
-	_link_focus()
+		if _touch:
+			b.focus_mode = Control.FOCUS_NONE
+			b.custom_minimum_size.y = 22.0
+		else:
+			b.mouse_entered.connect(func(): Sfx.play("ui_hover"))
+	if not _touch:
+		_link_focus()
 
 
 func _make_button(text: String, at: Vector2, button_size: Vector2) -> Button:
@@ -46,10 +58,13 @@ func _make_button(text: String, at: Vector2, button_size: Vector2) -> Button:
 	b.position = at
 	b.size = button_size
 	b.custom_minimum_size = button_size
-	b.mouse_entered.connect(func():
-		Sfx.play("ui_hover")
-		if not b.disabled:
-			b.grab_focus())
+	if _touch:
+		b.focus_mode = Control.FOCUS_NONE
+	else:
+		b.mouse_entered.connect(func():
+			Sfx.play("ui_hover")
+			if not b.disabled:
+				b.grab_focus())
 	add_child(b)
 	return b
 
@@ -81,7 +96,8 @@ func open(map_id: String) -> void:
 	danger = mini(Save.danger, Save.max_danger)
 	picked = Save.contracts.duplicate()
 	_sync()
-	go_button.grab_focus()
+	if not _touch:
+		go_button.grab_focus()
 
 
 func close() -> void:
@@ -152,13 +168,14 @@ func _draw() -> void:
 	Art.draw_text(self, "危险等级", Vector2(14, DANGER_TOP + 3), 12, Color("#f0d080"))
 	if Save.max_danger < GameData.MAX_DANGER:
 		Art.draw_text(self, "通关危 %d 解锁危 %d" % [Save.max_danger, Save.max_danger + 1], Vector2(size.x - 14, DANGER_TOP + 3), 12, Color("#8a8890"), 2)
-	Art.draw_text(self, GameData.danger_desc(danger), Vector2(14, DANGER_TOP + 23), 12, Color("#ff9070") if danger > 0 else Color("#a8d8a0"))
+	var danger_desc_y := DANGER_TOP + (25.0 if _touch else 23.0)
+	Art.draw_text(self, GameData.danger_desc(danger), Vector2(14, danger_desc_y), 12, Color("#ff9070") if danger > 0 else Color("#a8d8a0"))
 	Art.draw_text(self, "契约（可叠加，越难分越高）", Vector2(14, CONTRACT_TOP - 16), 12, Color("#f0d080"))
 	for i in GameData.CONTRACT_ORDER.size():
 		var id: String = GameData.CONTRACT_ORDER[i]
 		var spec: Dictionary = GameData.CONTRACTS[id]
 		var on := picked.has(id)
 		var line := "+%d%%  %s" % [roundi(float(spec["mult"]) * 100.0), spec["desc"]]
-		Art.draw_text(self, line, Vector2(DESC_X, CONTRACT_TOP + i * ROW_H + 3), 12, Color("#ffe080") if on else Color("#a8a4a0"))
-	var mult_y := CONTRACT_TOP + GameData.CONTRACT_ORDER.size() * ROW_H + 8
+		Art.draw_text(self, line, Vector2(DESC_X, CONTRACT_TOP + i * _row_height + 3), 12, Color("#ffe080") if on else Color("#a8a4a0"))
+	var mult_y := CONTRACT_TOP + GameData.CONTRACT_ORDER.size() * _row_height + 8
 	Art.draw_text(self, mult_line(), Vector2(size.x * 0.5, mult_y), 12, Color("#ffe080") if multiplier() > 1.0 else Color("#e8e4d8"), 1)

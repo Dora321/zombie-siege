@@ -1,5 +1,5 @@
 extends Control
-## 开局选图：三张缩略图卡片，可用鼠标或方向键加回车选择，Esc 返回。
+## 开局选图：点击缩略图进入行动准备，也可用方向键加回车选择。
 
 const Layouts := preload("res://scripts/game/map_layouts.gd")
 const CARD_SIZE := Vector2(144, 112)
@@ -17,27 +17,38 @@ var _shown := "ruins"
 
 func _ready() -> void:
 	visible = false
+	var touch := Mobile.is_touch()
+	var card_size := Vector2(CARD_SIZE.x, 122) if touch else CARD_SIZE
 	var gap := (size.x - CARD_SIZE.x * GameData.MAP_ORDER.size()) / (GameData.MAP_ORDER.size() + 1)
 	for i in GameData.MAP_ORDER.size():
 		var id: String = GameData.MAP_ORDER[i]
 		var card := Button.new()
 		card.text = String(GameData.MAPS[id]["name"])
+		if touch:
+			card.text += "\n" + String(GameData.MAPS[id]["tag"]).get_slice(" · ", 0)
 		card.icon = ImageTexture.create_from_image(Layouts.preview(id))
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		card.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		card.position = Vector2(gap + (CARD_SIZE.x + gap) * i, CARD_TOP)
-		card.size = CARD_SIZE
-		card.custom_minimum_size = CARD_SIZE
+		card.size = card_size
+		card.custom_minimum_size = card_size
 		card.pressed.connect(choose.bind(id))
-		card.focus_entered.connect(_show_map.bind(id))
-		card.mouse_entered.connect(func():
-			Sfx.play("ui_hover")
-			card.grab_focus())
+		if touch:
+			card.focus_mode = Control.FOCUS_NONE
+		else:
+			card.focus_entered.connect(_show_map.bind(id))
+			card.mouse_entered.connect(func():
+				Sfx.play("ui_hover")
+				card.grab_focus())
 		add_child(card)
 		cards[id] = card
-	_link_focus()
 	back_button.pressed.connect(close)
-	back_button.mouse_entered.connect(func(): Sfx.play("ui_hover"))
+	if touch:
+		back_button.focus_mode = Control.FOCUS_NONE
+		back_button.custom_minimum_size.y = 22.0
+	else:
+		_link_focus()
+		back_button.mouse_entered.connect(func(): Sfx.play("ui_hover"))
 
 
 ## 面板盖在标题菜单上面，不指定邻居的话方向键会跳到底下的按钮。
@@ -69,7 +80,8 @@ func _link_focus() -> void:
 func open() -> void:
 	visible = true
 	_show_map(Save.map_id)
-	cards[Save.map_id].grab_focus()
+	if not Mobile.is_touch():
+		cards[Save.map_id].grab_focus()
 
 
 func close() -> void:
