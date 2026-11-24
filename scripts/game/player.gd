@@ -7,6 +7,8 @@ const DASH_SPEED := 300.0
 const DASH_TIME := 0.15
 const BOX_R := 5.0
 const HAND_H := 7.0
+const AIM_ASSIST_RANGE := 220.0
+const AIM_ASSIST_ANGLE := deg_to_rad(24.0)
 ## 进化武器的名字和 HUD 标记用这个颜色。
 const EVO_COLOR := Color("#80f0ff")
 
@@ -72,6 +74,7 @@ var _latch_weapon := -1
 var _latch_item := ""
 var _latch_item_next := false
 var _buff_tint := false
+var _aim_assist_offset := 0.0
 
 @onready var body: Sprite2D = $Body
 @onready var gun: Sprite2D = $Gun
@@ -283,12 +286,26 @@ func _physics_process(dt: float) -> void:
 		bot.want_item = ""
 	else:
 		move_input = Input.get_vector("move_left", "move_right", "move_up", "move_down")
-		var mouse := get_global_mouse_position()
-		aim_point = mouse
-		var from := position + Vector2(0, -HAND_H)
-		if mouse.distance_squared_to(from) > 4.0:
-			aim = (mouse - from).normalized()
-		firing = Input.is_action_pressed("fire")
+		var touch := Mobile.is_touch()
+		var hand := position + Vector2(0, -HAND_H)
+		if touch:
+			if Mobile.move_vec.length_squared() > 0.0001:
+				move_input = Mobile.move_vec
+			if Mobile.aiming and Mobile.aim_vec.length_squared() > 0.01:
+				aim = Mobile.aim_vec.normalized()
+				if Save.auto_aim_on and Mobile.firing:
+					aim = _assisted_touch_aim(aim, hand, dt)
+				else:
+					_aim_assist_offset = 0.0
+			else:
+				_aim_assist_offset = 0.0
+			aim_point = hand + aim * 120.0
+		else:
+			var mouse := get_global_mouse_position()
+			aim_point = mouse
+			if mouse.distance_squared_to(hand) > 4.0:
+				aim = (mouse - hand).normalized()
+		firing = Input.is_action_pressed("fire") or (touch and Mobile.firing)
 		want_dash = _latch_dash
 		want_reload = _latch_reload
 		weapon_pick = _latch_weapon
@@ -300,6 +317,27 @@ func _physics_process(dt: float) -> void:
 		if _latch_item_next:
 			_latch_item_next = false
 			cycle_item()
+		if touch:
+			want_dash = want_dash or Mobile.latch_dash
+			want_reload = want_reload or Mobile.latch_reload
+			var id := Mobile.latch_weapon_id
+			if weapon_state.has(id) and owns_weapon(id) and carries(id):
+				weapon_pick = GameData.WEAPON_ORDER.find(id)
+			elif Mobile.latch_weapon_step != 0:
+				weapon_pick = _next_owned(Mobile.latch_weapon_step)
+			if GameData.ITEMS.has(Mobile.latch_item_select):
+				selected_item = Mobile.latch_item_select
+			if Mobile.latch_item_next:
+				cycle_item()
+			if GameData.ITEMS.has(Mobile.latch_item_use):
+				item_pick = Mobile.latch_item_use
+			Mobile.latch_dash = false
+			Mobile.latch_reload = false
+			Mobile.latch_weapon_id = ""
+			Mobile.latch_weapon_step = 0
+			Mobile.latch_item_select = ""
+			Mobile.latch_item_use = ""
+			Mobile.latch_item_next = false
 
 	if not control:
 		item_pick = ""
@@ -323,6 +361,26 @@ func _physics_process(dt: float) -> void:
 		_try_fire()
 	_move(move_input, dt)
 	_animate(dt, move_input)
+
+
+func _assisted_touch_aim(direction: Vector2, hand: Vector2, dt: float) -> Vector2:
+	var best_angle := AIM_ASSIST_ANGLE
+	var correction := 0.0
+	var view := get_viewport_rect()
+	var canvas := get_canvas_transform()
+	for z: Variant in game.zombies_near(hand, AIM_ASSIST_RANGE):
+		if z.dead or z.cloaked() or not z.is_visible_in_tree():
+			continue
+		var target: Vector2 = z.center()
+		var delta := target - hand
+		if delta.length_squared() > AIM_ASSIST_RANGE * AIM_ASSIST_RANGE or not view.has_point(canvas * target):
+			continue
+		var angle := direction.angle_to(delta)
+		if absf(angle) <= best_angle and map.line_clear(hand, target, map.BLOCK_BULLET):
+			best_angle = absf(angle)
+			correction = angle * 0.6
+	_aim_assist_offset = lerpf(_aim_assist_offset, correction, 1.0 - exp(-18.0 * dt))
+	return direction.rotated(_aim_assist_offset)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -629,6 +687,8 @@ func _try_dash(move_input: Vector2) -> void:
 	invuln = maxf(invuln, DASH_TIME + 0.08)
 	Sfx.play("dash")
 	game.fx.dust(position, 6)
+	if bot == null and Mobile.is_touch():
+		Mobile.trigger_haptic(12, 0.3)
 
 
 func take_damage(amount: float, attacker_pos: Variant = null) -> void:
@@ -643,6 +703,8 @@ func take_damage(amount: float, attacker_pos: Variant = null) -> void:
 		var from: Vector2 = attacker_pos
 		_knock += (position - from).normalized() * 150.0
 	game.on_player_hurt(amount)
+	if bot == null and Mobile.is_touch():
+		Mobile.trigger_haptic(25, 0.7)
 	game.fx.blood_hit(position + Vector2(0, -7), Vector2.UP, 6, Color("#a01c1c"))
 	if hp <= 0.0:
 		hp = 0.0

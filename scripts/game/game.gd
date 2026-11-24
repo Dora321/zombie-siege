@@ -34,6 +34,7 @@ const BOSS_DOWN_HOLD := 2.2
 @onready var camera: Camera2D = $Camera
 @onready var tint: CanvasModulate = $Tint
 @onready var hud: Control = $UI/HUD
+@onready var touch_ui: Control = $UI/TouchControls
 @onready var shop_ui: Control = $UI/Shop
 @onready var pause_ui: Control = $UI/PauseMenu
 @onready var over_ui: Control = $UI/GameOver
@@ -137,6 +138,7 @@ func _ready() -> void:
 	camera.position = _cam_pos
 	camera.make_current()
 	hud.setup(self)
+	touch_ui.setup(self)
 	shop_ui.setup(self)
 	pause_ui.setup(self)
 	over_ui.setup(self)
@@ -147,6 +149,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	Mobile.reset_placement(Vector2.ZERO, false)
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +174,14 @@ func _physics_process(dt: float) -> void:
 		State.CLEARED:
 			if _state_t <= 0.0:
 				_open_shop()
+		State.PLACING:
+			if Mobile.is_touch():
+				if Mobile.place_cancel:
+					Mobile.place_cancel = false
+					cancel_turret_placement()
+				elif Mobile.place_confirm:
+					Mobile.place_confirm = false
+					try_place_turret(map.cell_of(Mobile.place_world_pos))
 		State.OVER:
 			_tick_game_over()
 	if combo > 0:
@@ -202,16 +213,25 @@ func _unhandled_input(event: InputEvent) -> void:
 	if state == State.PLACING:
 		if event.is_action_pressed("cancel"):
 			cancel_turret_placement()
+		elif Mobile.is_touch():
+			return
 		elif event.is_action_pressed("fire"):
 			try_place_turret(map.cell_of(get_global_mouse_position() + Vector2(0, 4)))
 		get_viewport().set_input_as_handled()
 
 
 func _notification(what: int) -> void:
-	# 切走窗口时自动暂停，避免回来时基地已经没了。网页版只发窗口焦点通知
-	if (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT) and not Harness.automated() and is_node_ready():
-		if state == State.COMBAT or state == State.COUNTDOWN:
-			pause_ui.open()
+	# 切走窗口或把应用送到后台时自动暂停，并释放所有触点。
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_PAUSED:
+		touch_ui.hide()
+		return
+	if what not in [NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
+		return
+	touch_ui.reset_controls()
+	if not Harness.automated() and (state == State.COMBAT or state == State.COUNTDOWN or (Mobile.is_touch() and player_can_walk())):
+		pause_ui.open()
 
 
 func player_can_act() -> bool:
@@ -663,6 +683,8 @@ func on_base_destroyed() -> void:
 func _finish_game(reason: String) -> void:
 	if state == State.OVER:
 		return
+	if state == State.PLACING:
+		Mobile.reset_placement(Vector2.ZERO, false)
 	state = State.OVER
 	end_reason = reason
 	_over_t = 1.6
@@ -801,11 +823,13 @@ func after_repair() -> void:
 
 func begin_turret_placement() -> void:
 	state = State.PLACING
+	Mobile.reset_placement(player.position + player.aim * 32.0, true)
 	shop_ui.close()
 
 
 func cancel_turret_placement() -> void:
 	state = State.SHOP
+	Mobile.reset_placement(Vector2.ZERO, false)
 	shop_ui.open()
 
 
@@ -823,6 +847,7 @@ func try_place_turret(cell: int) -> bool:
 	fx.dust(t.position, 8)
 	if state == State.PLACING:
 		state = State.SHOP
+		Mobile.reset_placement(Vector2.ZERO, false)
 		shop_ui.open()
 	return true
 
@@ -851,14 +876,17 @@ func hitstop(seconds: float) -> void:
 
 func _update_camera(dt: float) -> void:
 	var target: Vector2 = player.position
-	if player.alive and player_can_walk():
-		var look: Vector2 = get_global_mouse_position() - player.position
-		if Harness.bot == null:
-			target += look.limit_length(float(_map_spec["look_limit"])) * float(_map_spec["look_gain"])
+	if player.alive and player_can_walk() and Harness.bot == null:
+		var look: Vector2
+		if Mobile.is_touch():
+			look = player.aim * 48.0 if Mobile.aiming else Vector2.ZERO
+		else:
+			look = (get_global_mouse_position() - player.position).limit_length(float(_map_spec["look_limit"]))
+		target += look * float(_map_spec["look_gain"])
 	_cam_pos = _cam_pos.lerp(target, clampf(dt * 7.0, 0.0, 1.0))
-	var half := Vector2(240, 135)
-	_cam_pos.x = clampf(_cam_pos.x, half.x, map.PIXEL_W - half.x)
-	_cam_pos.y = clampf(_cam_pos.y, half.y, map.PIXEL_H - half.y)
+	var vp_half := get_viewport_rect().size * 0.5
+	_cam_pos.x = map.PIXEL_W * 0.5 if map.PIXEL_W <= vp_half.x * 2.0 else clampf(_cam_pos.x, vp_half.x, map.PIXEL_W - vp_half.x)
+	_cam_pos.y = map.PIXEL_H * 0.5 if map.PIXEL_H <= vp_half.y * 2.0 else clampf(_cam_pos.y, vp_half.y, map.PIXEL_H - vp_half.y)
 	_trauma = maxf(_trauma - dt * 2.2, 0.0)
 	_shake_time += dt
 	_kick = _kick.lerp(Vector2.ZERO, clampf(dt * 16.0, 0.0, 1.0))
@@ -870,7 +898,7 @@ func _update_camera(dt: float) -> void:
 
 func _update_mouse_mode() -> void:
 	var want := Input.MOUSE_MODE_VISIBLE
-	if not get_tree().paused and (state == State.COMBAT or state == State.COUNTDOWN or state == State.CLEARED):
+	if not Mobile.is_touch() and not get_tree().paused and player_can_act():
 		want = Input.MOUSE_MODE_HIDDEN
 	if Input.mouse_mode != want:
 		Input.mouse_mode = want
