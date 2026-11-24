@@ -2,7 +2,8 @@ extends Control
 ## 开局选图：点击缩略图进入行动准备，也可用方向键加回车选择。
 
 const Layouts := preload("res://scripts/game/map_layouts.gd")
-const CARD_SIZE := Vector2(144, 112)
+const CARD_MAX_WIDTH := 144.0
+const CARD_GAP := 6.0
 const CARD_TOP := 24.0
 const DESC_TOP := 148.0
 
@@ -18,20 +19,16 @@ var _shown := "ruins"
 func _ready() -> void:
 	visible = false
 	var touch := Mobile.is_touch()
-	var card_size := Vector2(CARD_SIZE.x, 122) if touch else CARD_SIZE
-	var gap := (size.x - CARD_SIZE.x * GameData.MAP_ORDER.size()) / (GameData.MAP_ORDER.size() + 1)
-	for i in GameData.MAP_ORDER.size():
-		var id: String = GameData.MAP_ORDER[i]
+	for id in GameData.MAP_ORDER:
 		var card := Button.new()
 		card.text = String(GameData.MAPS[id]["name"])
 		if touch:
 			card.text += "\n" + String(GameData.MAPS[id]["tag"]).get_slice(" · ", 0)
 		card.icon = ImageTexture.create_from_image(Layouts.preview(id))
+		card.expand_icon = true
+		card.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		card.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-		card.position = Vector2(gap + (CARD_SIZE.x + gap) * i, CARD_TOP)
-		card.size = card_size
-		card.custom_minimum_size = card_size
 		card.pressed.connect(choose.bind(id))
 		if touch:
 			card.focus_mode = Control.FOCUS_NONE
@@ -42,6 +39,8 @@ func _ready() -> void:
 				card.grab_focus())
 		add_child(card)
 		cards[id] = card
+	resized.connect(_layout_cards)
+	_layout_cards()
 	back_button.pressed.connect(close)
 	if touch:
 		back_button.focus_mode = Control.FOCUS_NONE
@@ -49,6 +48,19 @@ func _ready() -> void:
 	else:
 		_link_focus()
 		back_button.mouse_entered.connect(func(): Sfx.play("ui_hover"))
+
+
+func _layout_cards() -> void:
+	var count := GameData.MAP_ORDER.size()
+	var width := floorf(minf(CARD_MAX_WIDTH, (size.x - CARD_GAP * (count + 1)) / count))
+	var gap := (size.x - width * count) / (count + 1)
+	var card_size := Vector2(width, 122.0 if Mobile.is_touch() else 112.0)
+	for i in count:
+		var card: Button = cards[GameData.MAP_ORDER[i]]
+		card.add_theme_constant_override("icon_max_width", int(width) - 12)
+		card.custom_minimum_size = card_size
+		card.position = Vector2(roundf(gap + (width + gap) * i), CARD_TOP)
+		card.size = card_size
 
 
 ## 面板盖在标题菜单上面，不指定邻居的话方向键会跳到底下的按钮。

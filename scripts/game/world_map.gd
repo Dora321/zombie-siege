@@ -36,10 +36,24 @@ const COST_BARRICADE := 130
 const COST_TURRET := 170
 const COST_BARREL := 220
 
+const SHOCK_COOLDOWN := 15.0
+const SHOCK_DURATION := 2.2
+const SHOCK_HIT_INTERVAL := 0.9
+
 const DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
 	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1),
 ]
+
+class ShockGate:
+	var rect: Rect2
+	var cd := 0.0
+	var active_t := 0.0
+	var next_hit: Dictionary[int, float] = {}
+
+	func _init(cells: Rect2i) -> void:
+		rect = Rect2(cells.position * TILE, cells.size * TILE)
+
 
 var game: Node
 var flags := PackedByteArray()
@@ -61,7 +75,11 @@ var minimap_tex: ImageTexture
 
 var _grid: Array = []
 var _compound := Rect2i(WALL_X0, WALL_Y0, WALL_X1 - WALL_X0 + 1, WALL_Y1 - WALL_Y0 + 1)
-var _barrel_spots: Array[int] = []
+var _barrel_spawns: Array[int] = []
+var _subway_barrels: Dictionary[int, Node2D] = {}
+var _last_refill_wave := 0
+var _shock_gates: Array[ShockGate] = []
+var _shock_powered := false
 var _ground: ImageTexture
 var _flow_dirty := false
 var _flow_wait := 0.0
@@ -95,6 +113,9 @@ func setup(g: Node, rng: RandomNumberGenerator) -> void:
 		_scatter_props(rng)
 	else:
 		_build_from_grid(rng)
+	if map_id == "subway":
+		for strip in Layouts.SUBWAY_GATES:
+			_shock_gates.append(ShockGate.new(strip))
 	rebuild_flow()
 	_collect_spawns()
 	queue_redraw()
@@ -106,6 +127,8 @@ func _physics_process(dt: float) -> void:
 	if _flow_dirty and _flow_wait <= 0.0 and _flow_task < 0:
 		_flow_start_task()
 		_flow_wait = 0.2
+	if map_id == "subway" and game != null:
+		_tick_subway(dt)
 
 
 func _exit_tree() -> void:
@@ -115,6 +138,96 @@ func _exit_tree() -> void:
 func _draw() -> void:
 	if _ground != null:
 		draw_texture(_ground, Vector2.ZERO)
+	for gate in _shock_gates:
+		_draw_shock_gate(gate)
+
+
+# ---------------------------------------------------------------------------
+# 地铁站台的高压电网闸门
+# ---------------------------------------------------------------------------
+
+func _tick_subway(dt: float) -> void:
+	if game.state == game.State.COUNTDOWN and game.wave != _last_refill_wave:
+		_last_refill_wave = game.wave
+		_refill_subway_barrels()
+		for gate in _shock_gates:
+			gate.active_t = 0.0
+			gate.next_hit.clear()
+		queue_redraw()
+	var powered: bool = game.state == game.State.COMBAT and not game.events.jammed()
+	if powered != _shock_powered:
+		_shock_powered = powered
+		queue_redraw()
+	if not powered:
+		return
+	for gate in _shock_gates:
+		_tick_shock_gate(gate, dt)
+
+
+func _tick_shock_gate(gate: ShockGate, dt: float) -> void:
+	if gate.cd > 0.0:
+		gate.cd = maxf(0.0, gate.cd - dt)
+		queue_redraw()
+	if gate.active_t > 0.0:
+		gate.active_t = maxf(0.0, gate.active_t - dt)
+		if gate.active_t <= 0.0:
+			gate.next_hit.clear()
+	if gate.cd > 0.0 and gate.active_t <= 0.0:
+		return
+	var targets: Array[Node2D] = []
+	for z: Variant in game.zombies:
+		if not z.dead and not z.burrowed and gate.rect.has_point(z.position):
+			targets.append(z)
+	if gate.active_t <= 0.0:
+		if targets.size() < 2:
+			return
+		gate.active_t = SHOCK_DURATION
+		gate.cd = SHOCK_COOLDOWN
+		Sfx.play("arc", -4.0)
+		queue_redraw()
+	var damage := 45.0 * GameData.hp_scale(game.wave)
+	for z in targets:
+		var id := z.get_instance_id()
+		if z.dead or gate.active_t > gate.next_hit.get(id, INF):
+			continue
+		gate.next_hit[id] = gate.active_t - SHOCK_HIT_INTERVAL
+		game.fx.zap(z.center())
+		z.take_damage(damage, Vector2.UP, 0.0, true, "arc")
+		z.stun(1.2)
+
+
+func _draw_shock_gate(gate: ShockGate) -> void:
+	var strip := gate.rect
+	var start := strip.position
+	draw_rect(strip, Color("#202934"))
+	for x in range(0, int(strip.size.x), 8):
+		for y: int in [1, TILE - 3]:
+			draw_rect(Rect2(start + Vector2(x, y), Vector2(4, 2)), Color("#c49a43"))
+	var active := _shock_powered and gate.active_t > 0.0
+	var charge := Color("#67edc9") if gate.cd <= 0.0 else Color("#f3a546")
+	if game.events.jammed():
+		charge = Color("#865050")
+	if active:
+		draw_rect(strip.grow(-3.0), Color(0.15, 0.75, 1.0, 0.18))
+		var points := PackedVector2Array([start + Vector2(0, 4)])
+		for x in range(7, int(strip.size.x), 7):
+			var offset := roundf(sin(x * 1.7 + gate.active_t * 94.0) * 5.0)
+			points.append(start + Vector2(x, 4.0 + offset))
+		points.append(start + Vector2(strip.size.x, 4))
+		draw_polyline(points, Color("#22badc"), 3.0)
+		draw_polyline(points, Color("#d3ffff"), 1.0)
+	else:
+		var gauge := Rect2(start + Vector2(7, 10), Vector2(strip.size.x - 14.0, 2))
+		draw_rect(gauge, Color("#10151a"))
+		gauge.size.x = ceilf(gauge.size.x * (1.0 - gate.cd / SHOCK_COOLDOWN))
+		draw_rect(gauge, charge)
+	for x: float in [start.x, strip.end.x]:
+		var post := Vector2(x, start.y + 4.0)
+		draw_rect(Rect2(post - Vector2(4, 7), Vector2(8, 16)), Color("#17232c"))
+		draw_rect(Rect2(post - Vector2(2, 6), Vector2(4, 12)), Color("#7890a4"))
+		for y: int in [-5, -2, 1]:
+			draw_rect(Rect2(post + Vector2(-3, y), Vector2(6, 1)), Color("#b3c7d2"))
+		draw_rect(Rect2(post + Vector2(-2, -9), Vector2(4, 3)), Color("#b4ffff") if active else charge)
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +590,9 @@ func alive_barrels() -> int:
 
 ## 波次之间补充炸药桶，让爆炸玩法贯穿全局。
 func respawn_barrels(rng: RandomNumberGenerator, count: int) -> void:
+	if map_id == "subway":
+		# 地铁站台在倒计时开始后按固定点位补满。
+		return
 	if not _grid.is_empty():
 		_respawn_barrels_at_spots(rng, count)
 		return
@@ -498,7 +614,7 @@ func respawn_barrels(rng: RandomNumberGenerator, count: int) -> void:
 
 ## 手工地图只在标好的点补桶，免得把窄巷堵死。
 func _respawn_barrels_at_spots(rng: RandomNumberGenerator, count: int) -> void:
-	var spots := _barrel_spots.duplicate()
+	var spots := _barrel_spawns.duplicate()
 	while count > 0 and not spots.is_empty():
 		var i: int = spots.pop_at(rng.randi() % spots.size())
 		if flags[i] != 0:
@@ -507,6 +623,27 @@ func _respawn_barrels_at_spots(rng: RandomNumberGenerator, count: int) -> void:
 			continue
 		_add_piece(i % W, i / W, "barrel")
 		count -= 1
+
+
+func _refill_subway_barrels() -> void:
+	for i in _barrel_spawns:
+		if flags[i] != 0 or structures.has(i):
+			continue
+		var rect := Rect2(cell_top_left(i), Vector2(TILE, TILE))
+		if game.player != null and rect.grow(game.player.BOX_R).has_point(game.player.position):
+			continue
+		var occupied := false
+		for z: Variant in game.zombies:
+			if not z.dead and rect.grow(z.BOX_R).has_point(z.position):
+				occupied = true
+				break
+		if occupied:
+			continue
+		if _subway_barrels.has(i):
+			var barrel := _subway_barrels[i]
+			barrel.repair(barrel.max_hp)
+		else:
+			_subway_barrels[i] = _add_piece(i % W, i / W, "barrel")
 
 
 func can_place_turret(i: int) -> bool:
@@ -550,6 +687,9 @@ func _read_layout() -> void:
 ## 按格子布局摆出楼房、围墙和摆件。
 func _build_from_grid(rng: RandomNumberGenerator) -> void:
 	var mini := Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
+	if map_id == "subway":
+		var pal: Dictionary = GameData.MAPS[map_id]["preview"]
+		Layouts.paint_subway_overview(mini, pal)
 	for y in H:
 		var row: String = _grid[y]
 		for x in W:
@@ -557,6 +697,8 @@ func _build_from_grid(rng: RandomNumberGenerator) -> void:
 				"#":
 					flags[idx(x, y)] = BLOCK_ALL
 					mini.set_pixel(x, y, Color(0.5, 0.48, 0.55, 0.75))
+				"T", "t":
+					flags[idx(x, y)] = BLOCK_ALL
 				"W":
 					_add_piece(x, y, "wall")
 				"B":
@@ -568,10 +710,13 @@ func _build_from_grid(rng: RandomNumberGenerator) -> void:
 				"D":
 					_add_prop(x, y, Art.dumpster_tex, 1)
 				"R":
-					_barrel_spots.append(idx(x, y))
+					_barrel_spawns.append(idx(x, y))
 	minimap_tex = ImageTexture.create_from_image(mini)
 	refresh_wall_faces()
-	respawn_barrels(rng, 8)
+	if map_id == "subway":
+		_refill_subway_barrels()
+	else:
+		respawn_barrels(rng, 8)
 
 
 ## 从 start 向外跑一遍广度优先，返回每格的步数（到不了是 -1）。
@@ -715,6 +860,13 @@ func _paint_base_pad(img: Image) -> void:
 func _build_grid_ground(rng: RandomNumberGenerator) -> void:
 	var img := Image.create_empty(PIXEL_W, PIXEL_H, false, Image.FORMAT_RGBA8)
 	var style := String(GameData.MAPS[map_id]["ground"])
+	var subway := map_id == "subway"
+	var platform_tiles: Array[Image] = []
+	if subway:
+		for concrete: Image in Art.tiles[style]:
+			var tile := concrete.duplicate() as Image
+			tile.adjust_bcs(0.66, 1.0, 0.45)
+			platform_tiles.append(tile)
 	var patches := FastNoiseLite.new()
 	patches.seed = rng.randi()
 	patches.frequency = 0.11
@@ -722,19 +874,77 @@ func _build_grid_ground(rng: RandomNumberGenerator) -> void:
 	for y in H:
 		for x in W:
 			var set_name := style
-			if _compound.has_point(Vector2i(x, y)):
+			var in_yard := _compound.has_point(Vector2i(x, y))
+			if in_yard:
 				set_name = "concrete"
-			elif patches.get_noise_2d(x, y) > 0.2:
+			elif not subway and patches.get_noise_2d(x, y) > 0.2:
 				set_name = style + "_alt"
-			if _grid_is_solid(x, y):
+			var solid := _grid_is_solid(x, y)
+			if solid:
 				set_name = "roof" if _grid_is_solid(x, y + 1) or y == H - 1 else "brick"
-			var set_tiles: Array = Art.tiles[set_name]
+			var set_tiles: Array = platform_tiles if subway and not in_yard and not solid else Art.tiles[set_name]
 			img.blit_rect(set_tiles[rng.randi() % set_tiles.size()], full, Vector2i(x * TILE, y * TILE))
-	if style == "asphalt":
+	if subway:
+		_paint_subway_tracks(img)
+		_paint_subway_cars(img)
+	elif style == "asphalt":
 		_paint_stalls(img)
 	_paint_building_edges(img)
 	_paint_base_pad(img)
 	_ground = ImageTexture.create_from_image(img)
+
+
+func _paint_subway_tracks(img: Image) -> void:
+	for track in Layouts.SUBWAY_TRACKS:
+		var bed := Rect2i(track.position * TILE, track.size * TILE)
+		var top := bed.position.y
+		img.fill_rect(bed, Color("#262c34"))
+		img.fill_rect(Rect2i(bed.position, Vector2i(bed.size.x, 2)), Color("#151a21"))
+		for x in range(bed.position.x + 4, bed.end.x, 8):
+			img.fill_rect(Rect2i(x, top + 5, 4, bed.size.y - 10), Color("#41434a"))
+		for y: int in [top + 11, bed.end.y - 13]:
+			img.fill_rect(Rect2i(bed.position.x, y, bed.size.x, 3), Color("#626c76"))
+			img.fill_rect(Rect2i(bed.position.x, y, bed.size.x, 1), Color("#a4abb2"))
+		for y: int in [top - 4, bed.end.y + 2]:
+			img.fill_rect(Rect2i(bed.position.x, y, bed.size.x, 2), Color("#ac8637"))
+			for x in range(bed.position.x, bed.end.x, 4):
+				img.fill_rect(Rect2i(x, y, 2, 2), Color("#e9c358"))
+		# 跨轨检修通道。露出两条钢轨，入口对准售票厅。
+		for x in range(30 * TILE, 34 * TILE, 4):
+			img.fill_rect(Rect2i(x, top, 3, 11), Color("#555e67"))
+			img.fill_rect(Rect2i(x, top + 14, 3, bed.size.y - 27), Color("#555e67"))
+			img.fill_rect(Rect2i(x, bed.end.y - 10, 3, 10), Color("#555e67"))
+
+
+func _paint_subway_cars(img: Image) -> void:
+	for y in H:
+		var row: String = _grid[y]
+		var x := 0
+		while x < W:
+			if row[x] != "T":
+				x += 1
+				continue
+			var start := x
+			while x < W and row[x] == "T":
+				x += 1
+			var left := start * TILE
+			var right := x * TILE
+			var top := y * TILE
+			img.fill_rect(Rect2i(left + 1, top + 2, right - left - 2, 30), Color("#18242d"))
+			img.fill_rect(Rect2i(left + 2, top + 1, right - left - 4, 18), Color("#7890a5"))
+			img.fill_rect(Rect2i(left + 4, top + 2, right - left - 8, 2), Color("#acbac2"))
+			img.fill_rect(Rect2i(left + 2, top + 19, right - left - 4, 10), Color("#476277"))
+			img.fill_rect(Rect2i(left + 2, top + 27, right - left - 4, 2), Color("#a5b8bf"))
+			for px in range(left + 10, right - 18, 20):
+				img.fill_rect(Rect2i(px, top + 21, 12, 5), Color("#1d3443"))
+				img.fill_rect(Rect2i(px + 1, top + 21, 10, 1), Color("#6aa6bb"))
+				img.fill_rect(Rect2i(px + 14, top + 20, 3, 6), Color("#314557"))
+			var middle := (left + right) / 2
+			img.fill_rect(Rect2i(middle - 10, top + 7, 20, 6), Color("#435971"))
+			for px in range(middle - 9, middle + 9, 3):
+				img.fill_rect(Rect2i(px, top + 8, 2, 4), Color("#688096"))
+			for px: int in [left + 3, right - 5]:
+				img.fill_rect(Rect2i(px, top + 24, 2, 2), Color("#eda757"))
 
 
 func _grid_is_solid(x: int, y: int) -> bool:
