@@ -14,6 +14,7 @@ boot_splash/bg_color=Color(0.07, 0.06, 0.09, 1)
 
 GameData="*res://scripts/autoload/game_data.gd"
 Save="*res://scripts/autoload/save.gd"
+Mobile="*res://scripts/autoload/mobile.gd"
 Art="*res://scripts/autoload/art.gd"
 Sfx="*res://scripts/autoload/sfx.gd"
 WindowFit="*res://scripts/autoload/window_fit.gd"
@@ -28,10 +29,15 @@ window/size/window_height_override=810
 window/stretch/mode="viewport"
 window/stretch/aspect="keep"
 window/stretch/scale_mode="integer"
+window/handheld/orientation=4
 
 [gui]
 
 theme/custom="res://resources/pixel_theme.tres"
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true
 
 [input]
 
@@ -157,6 +163,7 @@ common/physics_ticks_per_second=60
 textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
 2d/snap/snap_2d_transforms_to_pixel=true
 2d/snap/snap_2d_vertices_to_pixel=true
 environment/defaults/default_clear_color=Color(0.07, 0.06, 0.09, 1)

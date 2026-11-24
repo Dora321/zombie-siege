@@ -9,6 +9,7 @@ var scores: Array = []
 var music_on := true
 var sfx_on := true
 var shake_on := true
+var auto_aim_on := true
 ## 上次选的地图，再来一局和下次开局都沿用。
 var map_id := "ruins"
 ## 上次选的危险等级和契约，同样沿用；max_danger 是已解锁的最高危险等级（通关上一级解锁）。
@@ -31,6 +32,7 @@ func load_all() -> void:
 	music_on = bool(cfg.get_value("settings", "music", true))
 	sfx_on = bool(cfg.get_value("settings", "sfx", true))
 	shake_on = bool(cfg.get_value("settings", "shake", true))
+	auto_aim_on = bool(cfg.get_value("settings", "auto_aim", true))
 	var saved_map := String(cfg.get_value("settings", "map", "ruins"))
 	map_id = saved_map if GameData.MAPS.has(saved_map) else "ruins"
 	max_danger = clampi(int(cfg.get_value("records", "max_danger", 0)), 0, GameData.MAX_DANGER)
@@ -50,6 +52,7 @@ func save_all() -> void:
 	cfg.set_value("settings", "music", music_on)
 	cfg.set_value("settings", "sfx", sfx_on)
 	cfg.set_value("settings", "shake", shake_on)
+	cfg.set_value("settings", "auto_aim", auto_aim_on)
 	cfg.set_value("settings", "map", map_id)
 	cfg.set_value("run", "danger", danger)
 	cfg.set_value("run", "contracts", contracts)
