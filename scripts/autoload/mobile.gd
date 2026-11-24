@@ -1,5 +1,5 @@
 extends Node
-## 移动端 / 触控适配总控：平台检测、安全区换算、双摇杆与触屏按钮共享输入状态。
+## 移动端 / 触控 / 蓝牙手柄适配总控：平台检测、安全区换算、双摇杆、投掷预览与触觉反馈。
 
 var _forced_touch: Variant = null
 var wide_preview := false
@@ -8,8 +8,19 @@ var _safe_override: Variant = null
 ## 实时双摇杆与开火状态（由 TouchControls 写入，Player / Game / HUD 读取）
 var move_vec := Vector2.ZERO
 var aim_vec := Vector2.ZERO
+var aim_pull := 0.0
 var aiming := false
 var firing := false
+
+## 蓝牙手柄状态：检测到手柄输入时自动隐藏虚拟摇杆，触屏按下时立即恢复。
+var gamepad_active := false
+var gamepad_aim_vec := Vector2.ZERO
+
+## 道具长按拖拽瞄准状态（frag / sticky / flash / decoy）
+var item_aiming := false
+var item_aim_world := Vector2.ZERO
+var item_aim_cancel := false
+var item_aim_id := ""
 
 ## 单次触发动作锁存（由 TouchControls / HUD 写入，Player 消费）
 var latch_dash := false
@@ -19,6 +30,8 @@ var latch_weapon_step := 0
 var latch_item_use := ""
 var latch_item_select := ""
 var latch_item_next := false
+var latch_item_target := Vector2.ZERO
+var latch_item_has_target := false
 
 ## 炮塔触控放置状态（State.PLACING 时由 TouchControls 写入，Game / HUD 读取）
 var place_active := false
@@ -52,6 +65,31 @@ func _parse_args() -> void:
 				}
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton and event.pressed:
+		gamepad_active = true
+	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.35:
+		gamepad_active = true
+	elif event is InputEventScreenTouch and event.pressed:
+		gamepad_active = false
+
+
+func _process(_dt: float) -> void:
+	if not gamepad_active:
+		gamepad_aim_vec = Vector2.ZERO
+		return
+	var joy_ids := Input.get_connected_joypads()
+	if joy_ids.is_empty():
+		gamepad_active = false
+		gamepad_aim_vec = Vector2.ZERO
+		return
+	var dev: int = joy_ids[0]
+	var rx := Input.get_joy_axis(dev, JOY_AXIS_RIGHT_X)
+	var ry := Input.get_joy_axis(dev, JOY_AXIS_RIGHT_Y)
+	var v := Vector2(rx, ry)
+	gamepad_aim_vec = v.normalized() if v.length() > 0.25 else Vector2.ZERO
+
+
 func is_ios() -> bool:
 	return OS.has_feature("ios")
 
@@ -64,6 +102,10 @@ func is_touch() -> bool:
 	if _forced_touch != null:
 		return bool(_forced_touch)
 	return is_mobile() or DisplayServer.is_touchscreen_available()
+
+
+func show_touch_overlay() -> bool:
+	return is_touch() and not gamepad_active
 
 
 func use_expanded_viewport() -> bool:
@@ -99,8 +141,12 @@ func safe_insets(viewport: Viewport) -> Dictionary:
 func clear_controls() -> void:
 	move_vec = Vector2.ZERO
 	aim_vec = Vector2.ZERO
+	aim_pull = 0.0
 	aiming = false
 	firing = false
+	item_aiming = false
+	item_aim_cancel = false
+	item_aim_id = ""
 	latch_dash = false
 	latch_reload = false
 	latch_weapon_id = ""
@@ -108,6 +154,7 @@ func clear_controls() -> void:
 	latch_item_use = ""
 	latch_item_select = ""
 	latch_item_next = false
+	latch_item_has_target = false
 	place_confirm = false
 	place_cancel = false
 
@@ -126,3 +173,15 @@ func trigger_haptic(duration_ms := 18, amplitude := 0.45) -> void:
 	if DisplayServer.get_name() == "headless":
 		return
 	Input.vibrate_handheld(duration_ms, amplitude)
+
+
+func haptic_light() -> void:
+	trigger_haptic(10, 0.25)
+
+
+func haptic_medium() -> void:
+	trigger_haptic(18, 0.5)
+
+
+func haptic_heavy() -> void:
+	trigger_haptic(34, 0.85)
