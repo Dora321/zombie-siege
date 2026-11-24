@@ -25,6 +25,7 @@ var item_aim_id := ""
 ## 单次触发动作锁存（由 TouchControls / HUD 写入，Player 消费）
 var latch_dash := false
 var latch_reload := false
+var latch_overdrive := false
 var latch_weapon_id := ""
 var latch_weapon_step := 0
 var latch_item_use := ""
@@ -149,6 +150,7 @@ func clear_controls() -> void:
 	item_aim_id = ""
 	latch_dash = false
 	latch_reload = false
+	latch_overdrive = false
 	latch_weapon_id = ""
 	latch_weapon_step = 0
 	latch_item_use = ""

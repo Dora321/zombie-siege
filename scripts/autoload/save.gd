@@ -3,6 +3,8 @@ extends Node
 
 const MAX_SCORES := 5
 
+signal achievement_unlocked(id: String)
+
 ## 带命令行测试参数启动时写到单独的文件，不污染玩家的排行榜和局内续玩存档。
 var path := "user://zombie_siege.cfg"
 var resume_path := "user://zombie_siege_resume.cfg"
@@ -22,6 +24,13 @@ var game_mode := "normal"
 var max_danger := 0
 var best_endless_wave := 0
 var best_boss_rush_time := 0.0
+var daily_date := ""
+var daily_best := 0
+var achievements: Dictionary = {}
+var career := {
+	"kills": 0, "runs": 0, "victories": 0, "bosses": 0,
+	"mods_bought": 0, "overdrives": 0, "heroes_used": [],
+}
 ## 点击标题界面的「继续行动」时载入，由 game.gd 在 _ready() 消费并清空。
 var pending_resume: Dictionary = {}
 
@@ -49,6 +58,15 @@ func load_all() -> void:
 	max_danger = clampi(int(cfg.get_value("records", "max_danger", 0)), 0, GameData.MAX_DANGER)
 	best_endless_wave = maxi(int(cfg.get_value("records", "best_endless_wave", 0)), 0)
 	best_boss_rush_time = maxf(float(cfg.get_value("records", "best_boss_rush_time", 0.0)), 0.0)
+	daily_date = String(cfg.get_value("records", "daily_date", ""))
+	daily_best = maxi(int(cfg.get_value("records", "daily_best", 0)), 0)
+	var loaded_ach: Variant = cfg.get_value("records", "achievements", {})
+	achievements = (loaded_ach as Dictionary).duplicate(true) if loaded_ach is Dictionary else {}
+	var loaded_career: Variant = cfg.get_value("records", "career", {})
+	if loaded_career is Dictionary:
+		for k: String in career.keys():
+			if (loaded_career as Dictionary).has(k):
+				career[k] = (loaded_career as Dictionary)[k]
 	danger = clampi(int(cfg.get_value("run", "danger", 0)), 0, max_danger)
 	var saved_hero := String(cfg.get_value("run", "hero", "captain"))
 	hero_id = saved_hero if GameData.HEROES.has(saved_hero) else "captain"
@@ -77,6 +95,10 @@ func save_all() -> void:
 	cfg.set_value("records", "max_danger", max_danger)
 	cfg.set_value("records", "best_endless_wave", best_endless_wave)
 	cfg.set_value("records", "best_boss_rush_time", best_boss_rush_time)
+	cfg.set_value("records", "daily_date", daily_date)
+	cfg.set_value("records", "daily_best", daily_best)
+	cfg.set_value("records", "achievements", achievements)
+	cfg.set_value("records", "career", career)
 	cfg.save(path)
 
 
@@ -133,6 +155,69 @@ func record_boss_rush(seconds: float) -> bool:
 	best_boss_rush_time = seconds
 	save_all()
 	return true
+
+
+func has_achievement(id: String) -> bool:
+	return bool(achievements.get(id, false))
+
+
+func unlocked_achievement_count() -> int:
+	var n := 0
+	for id: String in GameData.ACHIEVEMENT_ORDER:
+		if has_achievement(id):
+			n += 1
+	return n
+
+
+func unlock_achievement(id: String) -> bool:
+	if not GameData.ACHIEVEMENTS.has(id) or has_achievement(id):
+		return false
+	achievements[id] = true
+	save_all()
+	if not Harness.automated():
+		achievement_unlocked.emit(id)
+	return true
+
+
+func record_career_kill(is_boss := false) -> void:
+	career["kills"] = int(career.get("kills", 0)) + 1
+	if is_boss:
+		career["bosses"] = int(career.get("bosses", 0)) + 1
+
+
+func record_career_run(victory: bool, run_hero: String) -> void:
+	career["runs"] = int(career.get("runs", 0)) + 1
+	if victory:
+		career["victories"] = int(career.get("victories", 0)) + 1
+	var used: Array = career.get("heroes_used", [])
+	if not (used is Array):
+		used = []
+	if run_hero != "" and not used.has(run_hero):
+		used.append(run_hero)
+	career["heroes_used"] = used
+	save_all()
+	if used.size() >= 3:
+		unlock_achievement("full_squad")
+
+
+func record_daily_score(date_key: String, score: int) -> bool:
+	if date_key == "":
+		return false
+	if daily_date != date_key:
+		daily_date = date_key
+		daily_best = score
+		save_all()
+		return true
+	if score > daily_best:
+		daily_best = score
+		save_all()
+		return true
+	return false
+
+
+func today_daily_best() -> int:
+	var today := Time.get_date_string_from_system()
+	return daily_best if daily_date == today else 0
 
 
 func clear_scores() -> void:

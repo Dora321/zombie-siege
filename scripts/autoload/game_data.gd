@@ -1033,3 +1033,64 @@ func build_boss_rush_queue(wave: int, rng: RandomNumberGenerator) -> Array[Strin
 	for _i in escort_count:
 		q.append(escorts[rng.randi_range(0, escorts.size() - 1)])
 	return q
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4：成就勋章墙、每日挑战与火力全开常量
+# ---------------------------------------------------------------------------
+
+const OVERDRIVE_MAX := 100.0
+const OVERDRIVE_DURATION := 6.0
+
+const ACHIEVEMENT_ORDER: Array[String] = [
+	"first_blood", "wave_5", "first_clear", "danger_3",
+	"endless_20", "boss_rush_clear", "gunsmith", "evolve_one",
+	"overdrive_go", "combo_30", "slayer_300", "turret_baron",
+	"quench_hit", "shatter_hit", "no_turret_win", "full_squad",
+]
+const ACHIEVEMENTS := {
+	"first_blood": {"name": "初战告捷", "desc": "击杀第一只僵尸", "color": "#a8e090"},
+	"wave_5": {"name": "稳住防线", "desc": "单局守过第 5 波尸潮", "color": "#80d8ff"},
+	"first_clear": {"name": "黎明撤离", "desc": "通关全部 15 波并击败尸王", "color": "#ffe060"},
+	"danger_3": {"name": "绝境求生", "desc": "在危险等级 3 及以上通关", "color": "#ff9050"},
+	"endless_20": {"name": "无尽守望", "desc": "无尽模式坚持到达第 20 波", "color": "#ff70a0"},
+	"boss_rush_clear": {"name": "斩首专家", "desc": "通关 8 场 Boss 连战模式", "color": "#ff6050"},
+	"gunsmith": {"name": "枪械大师", "desc": "为同一把武器装满 3 个配件", "color": "#80f0ff"},
+	"evolve_one": {"name": "终极改造", "desc": "成功进化任意一把满级武器", "color": "#70f0c8"},
+	"overdrive_go": {"name": "火力全开", "desc": "首次蓄满并触发狂暴时刻", "color": "#ffd850"},
+	"combo_30": {"name": "势不可挡", "desc": "单局达成 30 连杀以上", "color": "#ffb040"},
+	"slayer_300": {"name": "尸潮收割", "desc": "单局累计击杀 300 只僵尸", "color": "#e090ff"},
+	"turret_baron": {"name": "钢铁防线", "desc": "同场部署至少 6 座炮塔", "color": "#90f0a0"},
+	"quench_hit": {"name": "热胀冷缩", "desc": "触发「淬火」元素联动破甲", "color": "#90e8ff"},
+	"shatter_hit": {"name": "碎冰重击", "desc": "用霰弹或狙击触发「碎冰」", "color": "#a8f0ff"},
+	"no_turret_win": {"name": "孤胆英雄", "desc": "携带「禁炮塔」契约通关", "color": "#ffc070"},
+	"full_squad": {"name": "全员出击", "desc": "使用至少 3 个不同职业完成对局", "color": "#d0b0ff"},
+}
+
+
+func daily_config(date_str := "") -> Dictionary:
+	var day := date_str if date_str != "" else Time.get_date_string_from_system()
+	var seed_val := int(day.replace("-", "").to_int())
+	if seed_val <= 0:
+		seed_val = 20261125
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val * 2654435761
+	var mid: String = MAP_ORDER[rng.randi_range(0, MAP_ORDER.size() - 1)]
+	var hid: String = HERO_ORDER[rng.randi_range(0, HERO_ORDER.size() - 1)]
+	var pool: Array[String] = CONTRACT_ORDER.duplicate()
+	var picked: Array[String] = []
+	for _i in 2:
+		if pool.is_empty():
+			break
+		var idx := rng.randi_range(0, pool.size() - 1)
+		picked.append(pool[idx])
+		pool.remove_at(idx)
+	picked.sort_custom(func(a, b): return CONTRACT_ORDER.find(a) < CONTRACT_ORDER.find(b))
+	return {
+		"date": day,
+		"seed": seed_val,
+		"map_id": mid,
+		"hero_id": hid,
+		"danger": 1,
+		"contracts": picked,
+	}
