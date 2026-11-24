@@ -21,12 +21,12 @@ const MOVE_WARN := {
 	"fogring": 0.7, "fan": 0.6, "wave": 0.9, "call": 0.8, "elites": 1.0, "shield": 0.7, "scream": 0.9,
 	"burrow": 0.5, "emerge_slam": 0.7, "reflect_aura": 1.0,
 }
-## 覆甲阈值不管这些来源：爆炸、狙击、回旋镖、霰弹（整枪算一次爆发）、核弹、脚本直接扣血。
-const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "saw", "buckshot", "nuke", ""]
+## 覆甲阈值不管这些来源：爆炸、狙击、回旋镖、霰弹、蓝焰、核弹、脚本直接扣血。
+const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "saw", "buckshot", "blue_flame", "nuke", ""]
 ## 钻在地下时，这些直射打不到它（子弹从土堆上飞过去）。
 const DIRECT: Array[String] = ["bullet", "buckshot", "beam", "rang", "saw", "arc"]
 ## 镜面的克制：这些不看朝向（saw 是锯刃回旋，镜子弹不回）；直射从背后打进来也算。
-const MIRROR_WEAK: Array[String] = ["arc", "blast", "tick", "saw"]
+const MIRROR_WEAK: Array[String] = ["arc", "blast", "tick", "blue_flame", "saw"]
 const MIRROR_BACK: Array[String] = ["bullet", "buckshot", "beam"]
 const BURROW_SPEED := 1.3
 const BURROW_REACH := 400.0
@@ -75,11 +75,14 @@ var stats := {}
 var _clock := 0.0
 var _notes := {}
 var _text_t := 0.0
+var _counter_tip_shown := false
 # 再生
 var _regen_shown := 0.0
 var _regen_state := ""
+var _regen_ticks := 0
 # 钻地：_trail 是地下走过的土堆，出土后慢慢消失
 var _burrow_t := 0.0
+var _burrow_start := 0.0
 var _trail: Array = []
 var _trail_t := 0.0
 # 镜面：盾面朝向和反射光环剩余时间
@@ -159,6 +162,13 @@ func _say(z: Variant, text: String, color: Color) -> void:
 	z.game.fx.text(z.position + Vector2(0, -z.center_h * 2.0 - 8.0), text, color)
 
 
+func _counter_tip(z: Variant, ready: bool, title: String, sub: String, color: Color) -> void:
+	if not ready or _counter_tip_shown or Harness.automated():
+		return
+	_counter_tip_shown = true
+	z.game.hud.event_warn(title, sub, 3.6, color)
+
+
 func _apply_phase(z: Variant) -> void:
 	var p: Dictionary = phases[phase]
 	z._speed_mult = float(p.get("speed", 1.0))
@@ -167,14 +177,14 @@ func _apply_phase(z: Variant) -> void:
 	_enter = String(p.get("enter", ""))
 
 
-## src 是伤害来源：bullet/buckshot/beam/arc/rang/saw/blast/tick/nuke，脚本直接扣血是空串。
+## src 是伤害来源，脚本直接扣血是空串。
 func absorb(z: Variant, amount: float, src := "") -> float:
 	if changing_t > 0.0:
 		return 0.0
 	if underground():
 		if DIRECT.has(src):
 			return 0.0
-		_force_out(z, {"blast": "爆炸", "tick": "火焰"}.get(src, "重击"))
+		_force_out(z, {"blast": "爆炸", "tick": "火焰", "blue_flame": "火焰"}.get(src, "重击"))
 	# 覆甲：小伤害只结算一成。先看原始伤害，护盾照常全额吃
 	var light := _armored(z) and not FLOOR_EXEMPT.has(src) and amount < float(spec["hit_floor"])
 	if shield > 0.0:
@@ -193,6 +203,7 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 		_count("floor")
 		z.cue("叮", z.CUE_DING)
 		_note("floor", "%s 的装甲挡下小伤害（累计 %d 次，来源 %s）" % [spec["title"], int(stats["floor"]), src])
+		_counter_tip(z, int(stats["floor"]) >= 6, "厚甲弹开！", "换霰弹、狙击、爆炸或蓝焰熔炉破甲", Color("#ffd080"))
 	amount *= _guard
 	if phase + 1 < phases.size():
 		var floor_hp: float = float(phases[phase + 1]["at"]) * z.max_hp
@@ -285,6 +296,9 @@ func tick(z: Variant, dt: float) -> void:
 	_text_t -= dt
 	aura_t -= dt
 	_tick_regen(z, dt)
+	if underground():
+		_counter_tip(z, _clock - _burrow_start > 2.2 and not stats.has("forced_out"),
+			"钻入地下！", "用爆炸、火焰或闪光弹逼它出土", Color("#ffba78"))
 	var i := _trail.size() - 1
 	while i >= 0:
 		_trail[i]["t"] = float(_trail[i]["t"]) - dt
@@ -305,6 +319,7 @@ func _tick_regen(z: Variant, dt: float) -> void:
 		return
 	if z._chill_t > 0.0 or z._burn_t > 0.0:
 		_regen_state = "off"
+		_regen_ticks = 0
 		_count("regen_blocked_s", dt)
 		_note("regen_off", "%s 的再生被%s压住" % [spec["title"], "冰" if z._chill_t > 0.0 else "火"])
 		return
@@ -319,6 +334,8 @@ func _tick_regen(z: Variant, dt: float) -> void:
 	if _regen_shown >= 15.0:
 		z.game.fx.number(z.center() + Vector2(randf_range(-4, 4), -10), roundi(_regen_shown), Color("#80ff70"))
 		_regen_shown = 0.0
+		_regen_ticks += 1
+		_counter_tip(z, _regen_ticks >= 3, "正在再生！", "用冰冻枪、喷火器或龙息霰弹压制回血", Color("#80ff70"))
 		_note("regen_on", "%s 在再生（累计回了 %d 血）" % [spec["title"], roundi(float(stats["regen_hp"]))])
 
 
@@ -335,6 +352,8 @@ func reflect_shot(z: Variant, dir: Vector2, damage: float, src: String, from_pla
 	if from_player and player.alive:
 		var back: float = minf(damage * (AURA_MULT if aura else REFLECT_MULT), AURA_CAP if aura else REFLECT_CAP) * float(player.reflect_mult)
 		player.take_damage(back, z.center())
+		_count("reflect_player")
+		_counter_tip(z, int(stats["reflect_player"]) >= 3, "正面反伤！", "绕后射击，或用电弧、火焰、爆炸攻击", Color("#d0f0ff"))
 	_count("reflect")
 	_say(z, "弹回来了！", Color("#d0f0ff"))
 	_note("reflect", "%s %s弹回了%s（累计 %d 次）" % [spec["title"], "用光环" if aura else "正面", src, int(stats["reflect"])])
@@ -344,6 +363,7 @@ func reflect_shot(z: Variant, dir: Vector2, damage: float, src: String, from_pla
 func _dig_in(z: Variant) -> void:
 	var range_t: Array = phases[phase].get("burrow", spec["burrow"])
 	_burrow_t = randf_range(float(range_t[0]), float(range_t[1]))
+	_burrow_start = _clock
 	_trail_t = 0.0
 	z.burrowed = true
 	z.body.visible = false

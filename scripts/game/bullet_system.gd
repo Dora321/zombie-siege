@@ -15,6 +15,8 @@ class Bullet:
 	var color: Color
 	var from_player: bool
 	var chill := 0.0
+	## 龙息霰弹命中时点燃目标。
+	var burn := false
 	## 霰弹枪的弹丸，能打断 Boss 的连冲蓄力。
 	var buckshot := false
 	## 冰封雷（进化冰冻枪）：命中时在目标身上挂一颗冰雷。
@@ -153,6 +155,9 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 		if b.chill > 0.0:
 			best.apply_chill(b.chill)
 			game.fx.frost(best.center())
+		if b.burn:
+			best.ignite(3.5)
+			game.fx.ember(best.center())
 		if b.mine:
 			game.ordnance.plant_mine(best, damage)
 		if b.from_player:
