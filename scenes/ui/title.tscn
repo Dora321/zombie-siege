@@ -33,9 +33,9 @@ mouse_filter = 2
 [node name="Menu" type="VBoxContainer" parent="Content"]
 layout_mode = 0
 offset_left = 60.0
-offset_top = 100.0
+offset_top = 88.0
 offset_right = 200.0
-offset_bottom = 230.0
+offset_bottom = 244.0
 theme_override_constants/separation = 5
 
 [node name="ResumeButton" type="Button" parent="Content/Menu"]
@@ -53,6 +53,12 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)
 layout_mode = 2
 text = "开始游戏"
+
+[node name="BossRushButton" type="Button" parent="Content/Menu"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+text = "Boss 连战"
 
 [node name="HelpButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true

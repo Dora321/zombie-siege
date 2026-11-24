@@ -10,6 +10,9 @@ const HAND_H := 7.0
 const AIM_ASSIST_RANGE := 220.0
 const AUTO_LOCK_RANGE := 260.0
 const AIM_ASSIST_ANGLE := deg_to_rad(24.0)
+const ELEMENTAL_STATUS_BONUS := 0.6
+const HUNTER_SPEED_MULT := 1.15
+const HUNTER_DASH_MULT := 0.6
 ## 进化武器的名字和 HUD 标记用这个颜色。
 const EVO_COLOR := Color("#80f0ff")
 
@@ -17,12 +20,18 @@ var game: Node
 var map: Node2D
 var bot: Variant = null
 
+var hero_id := "captain"
 var hp := 100.0
 var max_hp := 100.0
 var alive := true
 var speed_mult := 1.0
 var dash_cd_base := 1.3
-var magnet_range := 42.0
+var magnet_range := 42.0:
+	get:
+		return magnet_range * 2.0 if _has_perk("gold_magnet") else magnet_range
+	set(value):
+		# 商店在当前拾取范围上乘倍率，天赋倍率不计入基础值。
+		magnet_range = value * 0.5 if _has_perk("gold_magnet") else value
 
 var weapon_id := "pistol"
 ## 每把枪的等级和弹药；level 为 0 表示还没解锁。
@@ -61,6 +70,7 @@ var buff_speed_t := 0.0
 var buff_damage_t := 0.0
 var buff_ammo_t := 0.0
 
+var _hero_tint := Color.WHITE
 var _knock := Vector2.ZERO
 var _flash_t := 0.0
 var _dir := 0
@@ -89,6 +99,9 @@ var touch_lock_target: Node2D = null
 func setup(g: Node, m: Node2D) -> void:
 	game = g
 	map = m
+	hero_id = String(g.get("hero_id")) if "hero_id" in g else ("captain" if Harness.automated() else Save.hero_id)
+	if not GameData.HEROES.has(hero_id):
+		hero_id = "captain"
 	shadow.texture = Art.shadow_small
 	shadow.position = Vector2(0, -1)
 	var size := Art.char_size("player")
@@ -106,10 +119,38 @@ func setup(g: Node, m: Node2D) -> void:
 			loadout.append(id)
 	for id: String in GameData.ITEM_ORDER:
 		items[id] = int(GameData.ITEMS[id]["start"])
+	if hero_id != "captain":
+		_apply_hero_loadout()
 	if g.has_contract("glass"):
 		max_hp *= GameData.GLASS_HP
 		hp = max_hp
 	_set_gun_sprite()
+
+
+func _apply_hero_loadout() -> void:
+	var spec: Dictionary = GameData.HEROES[hero_id]
+	max_hp = float(spec["hp"])
+	hp = max_hp
+	_hero_tint = Color(String(spec["tint"]))
+	_update_body_tint()
+	match hero_id:
+		"demo":
+			weapon_id = "grenade"
+			items["frag"] += 2
+		"elemental":
+			weapon_id = "cryo"
+			items["sticky"] += 1
+			status_bonus += ELEMENTAL_STATUS_BONUS
+		"hunter":
+			weapon_id = "boomerang"
+			speed_mult *= HUNTER_SPEED_MULT
+			dash_cd_base *= HUNTER_DASH_MULT
+	if weapon_id != "pistol":
+		upgrade_weapon(weapon_id)
+
+
+func _has_perk(id: String) -> bool:
+	return game != null and game.has_method("has_perk") and game.has_perk(id)
 
 
 func _refresh_stats(id: String) -> void:
@@ -118,6 +159,7 @@ func _refresh_stats(id: String) -> void:
 
 func export_run_state() -> Dictionary:
 	return {
+		"hero_id": hero_id, "speed_mult": speed_mult, "dash_cd_base": dash_cd_base,
 		"hp": hp, "max_hp": max_hp, "armor": armor,
 		"weapon_id": weapon_id, "weapon_slots": weapon_slots, "loadout": loadout.duplicate(),
 		"weapon_state": weapon_state.duplicate(true), "items": items.duplicate(true),
@@ -128,6 +170,18 @@ func export_run_state() -> Dictionary:
 
 
 func import_run_state(d: Dictionary) -> void:
+	var was_hunter := hero_id == "hunter"
+	var saved_hero: Variant = d.get("hero_id", "captain")
+	hero_id = saved_hero if saved_hero is String and GameData.HEROES.has(saved_hero) else "captain"
+	var is_hunter := hero_id == "hunter"
+	# 旧存档靠购买次数恢复属性，补上角色差值后再读取新存档中的完整数值。
+	if was_hunter != is_hunter:
+		speed_mult += (HUNTER_SPEED_MULT - 1.0) * (1.0 if is_hunter else -1.0)
+		dash_cd_base *= HUNTER_DASH_MULT if is_hunter else 1.0 / HUNTER_DASH_MULT
+	speed_mult = _saved_number(d, "speed_mult", speed_mult)
+	dash_cd_base = _saved_number(d, "dash_cd_base", dash_cd_base)
+	_hero_tint = Color(String(GameData.HEROES[hero_id]["tint"]))
+	_update_body_tint()
 	max_hp = maxf(_saved_number(d, "max_hp", max_hp), 1.0)
 	hp = clampf(_saved_number(d, "hp", hp), 0.0, max_hp)
 	armor = clampf(_saved_number(d, "armor", armor), 0.0, GameData.ARMOR_MAX)
@@ -593,8 +647,7 @@ func _tick_timers(dt: float) -> void:
 		buff_ammo_t = maxf(buff_ammo_t - dt, 0.0)
 	var tinted := buff_damage_t > 0.0
 	if tinted != _buff_tint:
-		_buff_tint = tinted
-		body.modulate = Color(1.5, 0.85, 0.8) if tinted else Color.WHITE
+		_update_body_tint()
 	recoil_px = move_toward(recoil_px, 0.0, dt * 22.0)
 	fired_kick = move_toward(fired_kick, 0.0, dt * 3.5)
 	if reload_t > 0.0:
@@ -602,6 +655,11 @@ func _tick_timers(dt: float) -> void:
 		if reload_t <= 0.0:
 			_finish_reload()
 		queue_redraw()
+
+
+func _update_body_tint() -> void:
+	_buff_tint = buff_damage_t > 0.0
+	body.modulate = _hero_tint * Color(1.5, 0.85, 0.8) if _buff_tint else _hero_tint
 
 
 func _move(move_input: Vector2, dt: float) -> void:
@@ -622,7 +680,8 @@ func _move(move_input: Vector2, dt: float) -> void:
 
 
 func move_speed() -> float:
-	return SPEED * speed_mult * game.events.player_speed * (GameData.SPEED_BUFF if buff_speed_t > 0.0 else 1.0)
+	var speed := SPEED * speed_mult * float(game.events.player_speed) * (GameData.SPEED_BUFF if buff_speed_t > 0.0 else 1.0)
+	return speed * 1.12 if _has_perk("overclock") else speed
 
 
 func _animate(dt: float, _move_input: Vector2) -> void:
@@ -694,8 +753,19 @@ func start_reload() -> void:
 			Sfx.play("empty")
 		return
 	reload_total = float(stats[weapon_id]["reload"])
+	if _has_perk("overclock"):
+		reload_total *= 0.75
 	reload_t = reload_total
 	Sfx.play("reload")
+	if _has_perk("reload_nova"):
+		var damage := 16.0 * damage_mult()
+		# 击杀会立即把僵尸从列表移除，按快照遍历。
+		for z: Variant in game.zombies.duplicate():
+			var offset: Vector2 = z.position - position
+			if not z.dead and offset.length_squared() <= 58.0 * 58.0:
+				z.take_damage(damage, offset.normalized(), 95.0)
+		game.fx.dust(position, 10)
+		Sfx.play("slam", -10.0)
 
 
 func _finish_reload() -> void:
@@ -725,13 +795,16 @@ func _try_fire() -> void:
 			Sfx.play("empty")
 			start_reload()
 		return
+	var damage := float(s["damage"]) * damage_mult()
+	if not returns and _has_perk("last_stand") and int(st["mag"]) <= maxi(1, ceili(float(mag_size()) * 0.25)):
+		damage *= 1.6
 	if not free_shot:
 		st["mag"] = int(st["mag"]) - 1
 	cooldown = float(s["cooldown"])
 	if evolution(weapon_id) == "pulse_minigun":
 		cooldown *= lerpf(1.0, 0.68, _minigun_spin)
 	var muzzle := muzzle_pos()
-	_fire_mode(s, muzzle, float(s["damage"]) * damage_mult())
+	_fire_mode(s, muzzle, damage)
 	if bot == null and weapon_id in ["shotgun", "sniper", "grenade"]:
 		Mobile.haptic_light()
 	if s.has("casing"):
@@ -747,6 +820,8 @@ func _try_fire() -> void:
 
 
 func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
+	if hero_id == "elemental" and weapon_id in ["cryo", "flamer", "arc"]:
+		damage *= 1.2
 	var mode := String(s.get("mode", "bullet"))
 	var flash := String(s.get("flash", ""))
 	var evo := evolution(weapon_id)
@@ -771,6 +846,9 @@ func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 			var knock := float(s["knock"])
 			var life := float(s["life"])
 			var pierce := int(s["pierce"])
+			if _has_perk("ricochet"):
+				pierce += 1
+				damage *= 1.12
 			if evo == "twin_handgun":
 				var offset := aim.orthogonal() * 2.5
 				var shot_velocity := aim * float(s["speed"]) * randf_range(0.92, 1.05)
@@ -874,6 +952,8 @@ func _try_dash(move_input: Vector2) -> void:
 	dash_t = DASH_TIME
 	dash_cd = dash_cd_base
 	invuln = maxf(invuln, DASH_TIME + 0.08)
+	if _has_perk("dash_arc"):
+		game.ordnance.arc(position + Vector2(0, -HAND_H), dash_dir, 96.0, 26.0 * damage_mult(), 3, 58.0, 18.0, false)
 	Sfx.play("dash")
 	game.fx.dust(position, 6)
 	if bot == null and Mobile.is_touch():
@@ -929,7 +1009,7 @@ func apply_trophy(id: String) -> void:
 		"plating":
 			sticky_mult = GameData.TROPHY_STICKY
 		"ash":
-			status_bonus = GameData.TROPHY_STATUS_TIME
+			status_bonus = GameData.TROPHY_STATUS_TIME + (ELEMENTAL_STATUS_BONUS if hero_id == "elemental" else 0.0)
 		"soil":
 			blast_boss_mult = GameData.TROPHY_BLAST_BOSS
 		"shard":

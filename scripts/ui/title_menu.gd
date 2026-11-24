@@ -15,6 +15,7 @@ const TOUCH_HELP := """左摇移动，右摇瞄准并开火
 @onready var content: Control = %Content
 @onready var resume_button: Button = %ResumeButton
 @onready var start_button: Button = %StartButton
+@onready var boss_rush_button: Button = %BossRushButton
 @onready var help_button: Button = %HelpButton
 @onready var bestiary_button: Button = %BestiaryButton
 @onready var bestiary_panel: Control = %BestiaryPanel
@@ -50,6 +51,8 @@ func _ready() -> void:
 		_walkers.append(_new_walker(randf_range(-20.0, size.x + 20.0)))
 	resume_button.pressed.connect(_on_resume)
 	start_button.pressed.connect(_on_start)
+	boss_rush_button.pressed.connect(_open_map.bind("boss_rush"))
+	boss_rush_button.visible = not Harness.automated()
 	help_button.pressed.connect(_on_help)
 	bestiary_button.pressed.connect(_on_bestiary)
 	bestiary_panel.closed.connect(_focus_start)
@@ -64,7 +67,7 @@ func _ready() -> void:
 		Sfx.play("ui_click")
 		_focus_start())
 	var touch := Mobile.is_touch()
-	for b: Button in [resume_button, start_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
+	for b: Button in [resume_button, start_button, boss_rush_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
 		if touch:
 			b.focus_mode = Control.FOCUS_NONE
 			b.custom_minimum_size.y = 22.0
@@ -150,6 +153,9 @@ func _refresh_scores() -> void:
 		lines.append(line)
 	if Save.best_endless_wave > 0:
 		lines.append("无尽最高：第 %d 波" % Save.best_endless_wave)
+	if Save.best_boss_rush_time > 0.0:
+		var seconds := int(Save.best_boss_rush_time)
+		lines.append("连战最快：%d:%02d" % [floori(Save.best_boss_rush_time / 60.0), seconds % 60])
 	scores_label.text = "\n".join(lines)
 
 
@@ -157,7 +163,10 @@ func _refresh_resume() -> void:
 	var summary: Dictionary = {} if Harness.automated() else Save.load_resume_summary()
 	resume_button.visible = not summary.is_empty()
 	var menu: VBoxContainer = resume_button.get_parent()
-	menu.add_theme_constant_override("separation", 2 if resume_button.visible else 5)
+	var separation := 2 if resume_button.visible else 5
+	if Mobile.is_touch() and resume_button.visible:
+		separation = 0
+	menu.add_theme_constant_override("separation", separation)
 	if resume_button.visible:
 		var next_wave := int(summary["wave"]) + 1
 		resume_button.text = ("继续无尽第 %d 波" if bool(summary["endless"]) else "继续第 %d 波") % next_wave
@@ -174,6 +183,11 @@ func _on_resume() -> void:
 
 
 func _on_start() -> void:
+	_open_map("normal")
+
+
+func _open_map(mode: String) -> void:
+	Save.game_mode = mode
 	Sfx.play("ui_click")
 	map_panel.open()
 
