@@ -57,6 +57,8 @@ var purchases := {}
 var nuke_wave := 0
 var god_mode := false
 var victory := false
+var endless := false
+var _endless_recorded_victory := false
 var end_reason := ""
 var result_rank := 0
 ## 克制反馈飘字（叮、弱点！……）各出现了几次，机器人日志和测试看这个。
@@ -110,6 +112,13 @@ func _ready() -> void:
 	_buckets.resize(BUCKET_W * BUCKET_H)
 	for i in _buckets.size():
 		_buckets[i] = []
+	var resume: Dictionary = {}
+	if not Harness.automated() and not Save.pending_resume.is_empty():
+		resume = Save.pending_resume.duplicate(true)
+		Save.pending_resume = {}
+		Save.map_id = String(resume.get("map_id", Save.map_id))
+		Save.danger = int(resume.get("danger", 0))
+		Save.contracts.assign(resume.get("contracts", []))
 	danger = Save.danger
 	contracts = Save.contracts.duplicate()
 	score_mult = GameData.run_mult(danger, contracts)
@@ -142,14 +151,148 @@ func _ready() -> void:
 	shop_ui.setup(self)
 	pause_ui.setup(self)
 	over_ui.setup(self)
-	Sfx.play_music("menu")
 	Harness.on_game_ready(self)
-	_begin_countdown(Harness.start_wave)
+	if resume.is_empty():
+		_begin_countdown(Harness.start_wave)
+	else:
+		_restore_resume_state(resume)
+		events.plan_wave(wave + 1)
+		_open_shop()
+		hud.announce("继续行动", "第 %d 波前休整" % (wave + 1), 2.0)
 
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	Mobile.reset_placement(Vector2.ZERO, false)
+
+
+# ---------------------------------------------------------------------------
+# 波次间续玩存档
+# ---------------------------------------------------------------------------
+
+func _save_resume_state() -> void:
+	if Harness.automated():
+		return
+	var turret_cells: Array[int] = []
+	var turret_hp := {}
+	for t: Variant in turrets:
+		if t.alive:
+			var cell: int = map.cell_of(t.position)
+			turret_cells.append(cell)
+			turret_hp[cell] = t.hp
+	var wall_hp := {}
+	for piece: Variant in map.pieces:
+		if piece.kind != "barrel" and piece.hp < piece.max_hp:
+			wall_hp[piece.cell] = piece.hp
+	var player_data: Dictionary
+	if player.has_method("export_run_state"):
+		player_data = player.call("export_run_state")
+	else:
+		player_data = {
+			"hp": player.hp, "max_hp": player.max_hp, "armor": player.armor,
+			"weapon_id": player.weapon_id, "weapon_slots": player.weapon_slots,
+			"loadout": player.loadout, "weapon_state": player.weapon_state,
+			"items": player.items, "used_items": player.used_items, "selected_item": player.selected_item,
+			"dot_mult": player.dot_mult,
+			"sticky_mult": player.sticky_mult, "status_bonus": player.status_bonus,
+			"blast_boss_mult": player.blast_boss_mult, "reflect_mult": player.reflect_mult,
+		}
+	Save.save_resume_run({
+		"wave": wave, "endless": endless, "score": score, "raw_score": raw_score,
+		"coins": coins, "kills": kills, "coins_earned": coins_earned,
+		"best_combo": best_combo, "time_alive": time_alive,
+		"shots_fired": bullets.shots_fired, "shots_hit": bullets.shots_hit,
+		"map_id": map.map_id, "danger": danger, "contracts": contracts,
+		"turret_level": turret_level, "wall_tier": map.wall_tier,
+		"base_hp": base.hp, "base_max_hp": base.max_hp, "purchases": purchases,
+		"kind_kills": kind_kills, "turret_cells": turret_cells, "player": player_data,
+		"wall_hp": wall_hp, "turret_hp": turret_hp,
+	})
+
+
+func _restore_resume_state(data: Dictionary) -> void:
+	wave = int(data.get("wave", 1))
+	endless = bool(data.get("endless", false))
+	_endless_recorded_victory = endless
+	score = int(data.get("score", 0))
+	raw_score = int(data.get("raw_score", 0))
+	coins = int(data.get("coins", coins))
+	kills = int(data.get("kills", 0))
+	coins_earned = int(data.get("coins_earned", 0))
+	best_combo = int(data.get("best_combo", 0))
+	time_alive = float(data.get("time_alive", 0.0))
+	bullets.shots_fired = int(data.get("shots_fired", 0))
+	bullets.shots_hit = int(data.get("shots_hit", 0))
+	turret_level = int(data.get("turret_level", 1))
+	purchases = data.get("purchases", {})
+	kind_kills = data.get("kind_kills", {})
+	base.max_hp = float(data.get("base_max_hp", base.max_hp))
+	base.hp = float(data.get("base_hp", base.max_hp))
+	base.heal(0.0)
+	for i in clampi(int(data.get("wall_tier", 0)), 0, Shop.MAX_WALL_TIER):
+		map.raise_wall_tier()
+	var wall_hp: Dictionary = data.get("wall_hp", {})
+	for piece: Variant in map.pieces:
+		if piece.kind == "barrel" or not wall_hp.has(piece.cell):
+			continue
+		piece.hp = clampf(float(wall_hp[piece.cell]), 0.0, piece.max_hp)
+		if piece.hp <= 0.0:
+			_hide_resume_structure(piece)
+		else:
+			piece._update_sprite()
+	var turret_hp: Dictionary = data.get("turret_hp", {})
+	for saved_cell: Variant in data.get("turret_cells", []):
+		var cell := int(saved_cell)
+		if cell < 0 or cell >= map.flags.size():
+			continue
+		# 重建地图时，补出的桶可能占到存档中的炮塔格。
+		var occupant: Variant = map.structures.get(cell)
+		if occupant != null and occupant.kind in ["barrel", "wall", "barricade"]:
+			_hide_resume_structure(occupant)
+		if map.flags[cell] == 0:
+			var t := _add_turret(cell)
+			t.hp = minf(float(turret_hp.get(cell, t.max_hp)), t.max_hp)
+	map.refresh_wall_faces()
+	var player_data: Dictionary = data.get("player", {})
+	# 这三项属性由购买次数派生，玩家存档只需保存装备、生命和战利品。
+	player.speed_mult += 0.08 * int(purchases.get("boots", 0))
+	player.dash_cd_base *= pow(0.8, int(purchases.get("dash", 0)))
+	player.magnet_range *= pow(1.4, int(purchases.get("magnet", 0)))
+	if player.has_method("import_run_state"):
+		player.call("import_run_state", player_data)
+	else:
+		_restore_player_fallback(player_data)
+	player.position = map.unstick(player.position, player.BOX_R, map.BLOCK_PLAYER)
+	_cam_pos = player.position
+	camera.position = _cam_pos
+
+
+func _hide_resume_structure(piece: Node2D) -> void:
+	piece.hp = 0.0
+	piece.alive = false
+	piece.hide()
+	map.clear_structure(piece.cell)
+
+
+func _restore_player_fallback(data: Dictionary) -> void:
+	player.max_hp = float(data.get("max_hp", player.max_hp))
+	player.hp = float(data.get("hp", player.max_hp))
+	player.armor = float(data.get("armor", player.armor))
+	player.weapon_slots = int(data.get("weapon_slots", player.weapon_slots))
+	player.loadout.assign(data.get("loadout", player.loadout))
+	player.weapon_state.merge(data.get("weapon_state", {}), true)
+	for id: String in GameData.WEAPON_ORDER:
+		player._refresh_stats(id)
+	player.weapon_id = String(data.get("weapon_id", player.weapon_id))
+	player._set_gun_sprite()
+	player.items.merge(data.get("items", {}), true)
+	player.used_items = data.get("used_items", {})
+	player.selected_item = String(data.get("selected_item", player.selected_item))
+	player.dot_mult = float(data.get("dot_mult", player.dot_mult))
+	player.sticky_mult = float(data.get("sticky_mult", player.sticky_mult))
+	player.status_bonus = float(data.get("status_bonus", player.status_bonus))
+	player.blast_boss_mult = float(data.get("blast_boss_mult", player.blast_boss_mult))
+	player.reflect_mult = float(data.get("reflect_mult", player.reflect_mult))
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +393,15 @@ func _begin_countdown(next_wave: int) -> void:
 	wave = next_wave
 	state = State.COUNTDOWN
 	_state_t = COUNTDOWN_TIME
-	_queue = GameData.build_spawn_queue(wave)
+	var wave_name: String
+	var sub := ""
+	if wave > GameData.MAX_WAVE:
+		_queue = _build_endless_queue(wave)
+		wave_name = "无尽尸潮 #%d" % (wave - GameData.MAX_WAVE)
+	else:
+		_queue = GameData.build_spawn_queue(wave)
+		wave_name = GameData.wave_name(wave)
+		sub = GameData.wave_hint(wave)
 	_group_left = 0
 	pickups.magnet_all = false
 	if wave > 1:
@@ -259,11 +410,25 @@ func _begin_countdown(next_wave: int) -> void:
 			map.respawn_barrels(_rng, 2)
 	events.on_countdown(wave)
 	_tween_tint(_combat_tint())
-	var sub: String = GameData.wave_hint(wave)
 	if sub == "":
 		sub = "共 %d 只僵尸，准备迎战" % _queue.size()
-	hud.announce("第 %d 波：%s" % [wave, GameData.wave_name(wave)], sub, COUNTDOWN_TIME)
+	hud.announce("第 %d 波：%s" % [wave, wave_name], sub, COUNTDOWN_TIME)
 	Sfx.play_music("menu")
+
+
+func _build_endless_queue(next_wave: int) -> Array[String]:
+	if GameData.has_method("build_endless_queue"):
+		return GameData.call("build_endless_queue", next_wave, _rng)
+	var extra := next_wave - GameData.MAX_WAVE
+	var kinds: Array[String] = ["runner", "spitter", "exploder", "tank", "shielder", "splitter", "stalker", "screamer", "summoner", "balloon"]
+	var queue: Array[String] = []
+	var count := roundi(mini(52 + extra * 5, 160) * float(_map_spec["count_scale"]))
+	for i in count:
+		queue.append(kinds[_rng.randi_range(0, kinds.size() - 1)])
+	if next_wave % 2 == 0:
+		var bosses: Array = GameData.BOSSES.keys()
+		queue.insert(queue.size() / 2, String(bosses[(extra / 2) % bosses.size()]))
+	return queue
 
 
 func _begin_combat() -> void:
@@ -274,8 +439,11 @@ func _begin_combat() -> void:
 	events.on_combat()
 	for kind: String in GameData.BOSSES.keys():
 		if _queue.has(kind):
+			if wave >= GameData.MAX_WAVE:
+				_play_boss_music()
 			hud.announce("Boss 战：%s" % GameData.BOSSES[kind]["title"], "击退前锋后它就会现身", 2.6)
 			Sfx.play("boss_roar", -6.0)
+			break
 
 
 func _tick_spawner(dt: float) -> void:
@@ -292,6 +460,8 @@ func _tick_spawner(dt: float) -> void:
 		var group: Array = _map_spec["group"]
 		_group_left = _rng.randi_range(int(group[0]), int(group[1]) + wave / int(_map_spec["group_grow"]))
 	var burst := 1 + wave / 5
+	if wave > GameData.MAX_WAVE:
+		burst = mini(burst, MAX_ALIVE - zombies.size())
 	for i in burst:
 		if _queue.is_empty():
 			break
@@ -321,6 +491,17 @@ func _add_zombie(kind: String, pos: Vector2) -> Node2D:
 	var z: Node2D = ZombieScene.instantiate()
 	entities.add_child(z)
 	z.setup(self, map, kind, pos, wave)
+	if wave > GameData.MAX_WAVE:
+		var extra := wave - GameData.MAX_WAVE
+		var hp_mult := 1.0 + 0.14 * extra
+		var speed_mult := minf(1.35, 1.0 + 0.025 * extra)
+		if GameData.has_method("endless_hp_mult"):
+			hp_mult = float(GameData.call("endless_hp_mult", wave))
+		if GameData.has_method("endless_speed_mult"):
+			speed_mult = float(GameData.call("endless_speed_mult", wave))
+		z.max_hp *= hp_mult
+		z.hp *= hp_mult
+		z._speed *= speed_mult
 	zombies.append(z)
 	return z
 
@@ -382,8 +563,13 @@ func _on_boss_spawn(z: Variant) -> void:
 	var spec: Dictionary = GameData.BOSSES[z.kind]
 	hud.announce("警告：%s 来袭！" % spec["title"], String(spec["warn"]), 2.6)
 	Sfx.play("boss_roar")
-	Sfx.play_music("boss")
+	_play_boss_music()
 	add_shake(0.4)
+
+
+func _play_boss_music() -> void:
+	# 连杀音效和扩充曲目由同一版音频脚本提供。
+	Sfx.play_music("final_boss" if wave >= GameData.MAX_WAVE and Sfx.has_method("play_kill") else "boss")
 
 
 func on_boss_phase(z: Variant, phase_spec: Dictionary, index: int, total: int) -> void:
@@ -410,7 +596,7 @@ func on_boss_down(z: Variant) -> void:
 		explode.call_deferred(z.position + Vector2(randf_range(-26, 26), randf_range(-34, 4)), 0.0, 30.0, true)
 	if boss_list.is_empty():
 		Sfx.play_music("combat")
-	if bool(spec.get("final", false)):
+	if not endless and bool(spec.get("final", false)):
 		# 尸王一倒，整座城的尸群跟着散，掉落全部飞向玩家
 		_queue.clear()
 		pickups.magnet_all = true
@@ -438,7 +624,7 @@ func _boss_loot(z: Variant) -> void:
 # ---------------------------------------------------------------------------
 
 func _tick_special(dt: float) -> void:
-	if GameData.wave_special(wave) != "acid_rain" or _queue.is_empty() and zombies.is_empty():
+	if wave > GameData.MAX_WAVE or GameData.wave_special(wave) != "acid_rain" or _queue.is_empty() and zombies.is_empty():
 		return
 	_acid_t -= dt
 	if _acid_t > 0.0 or player == null or not player.alive:
@@ -474,12 +660,14 @@ func _wave_cleared() -> void:
 	Sfx.play("wave_clear")
 	Sfx.play_music("menu")
 	_tween_tint(_map_tint)
-	if wave >= GameData.MAX_WAVE:
+	if wave >= GameData.MAX_WAVE and not endless:
 		victory = true
 		pickups.collect_all()
 		hud.announce("守住了！救援直升机抵达", "你撑过了全部 %d 波" % GameData.MAX_WAVE, CLEARED_TIME)
 		_finish_game("基地守住了，幸存者全部撤离。")
 		return
+	if endless:
+		Save.record_endless(wave)
 	state = State.CLEARED
 	_state_t = CLEARED_TIME
 	hud.announce("第 %d 波 肃清" % wave, "奖励金币 +%d" % bonus, CLEARED_TIME)
@@ -488,8 +676,30 @@ func _wave_cleared() -> void:
 func _open_shop() -> void:
 	state = State.SHOP
 	# 打扫战场：把没捡到的东西都塞给玩家
+	if not Harness.automated():
+		pickups.collect_all()
+		_save_resume_state()
 	shop_ui.open()
+	if not Sfx.has_method("play_kill"):
+		Sfx.play_music("menu")
+	Sfx.play_music("shop")
 	Harness.on_shop_open(self)
+
+
+func continue_endless() -> void:
+	if not _endless_recorded_victory or not victory or endless or state != State.OVER:
+		return
+	endless = true
+	victory = false
+	# 胜利结算已经乘过倍率，继续时回到原分，避免无尽结算时乘两次。
+	score = raw_score
+	_over_t = -1.0
+	over_ui.hide()
+	Engine.time_scale = 1.0
+	get_tree().paused = false
+	player.heal(player.max_hp * 0.35)
+	base.heal(base.max_hp * 0.25)
+	_open_shop()
 
 
 func start_next_wave() -> void:
@@ -503,12 +713,12 @@ func _combat_tint() -> Color:
 
 
 func _wave_tint() -> Color:
+	if wave >= GameData.MAX_WAVE:
+		return Color(0.82, 0.58, 0.58)
 	if GameData.wave_special(wave) == "blackout":
 		return Color(0.42, 0.45, 0.68)
 	if GameData.wave_special(wave) == "acid_rain":
 		return Color(0.78, 0.92, 0.66)
-	if wave >= GameData.MAX_WAVE:
-		return Color(0.82, 0.58, 0.58)
 	if GameData.boss_wave(wave):
 		return Color(0.82, 0.68, 0.68)
 	var night := clampf(float(wave) / GameData.MAX_WAVE, 0.0, 1.0)
@@ -578,6 +788,8 @@ func credit_kill(z: Variant, drops: bool) -> void:
 	combo += 1
 	combo_t = COMBO_WINDOW
 	best_combo = maxi(best_combo, combo)
+	if Sfx.has_method("play_kill"):
+		Sfx.call("play_kill", combo)
 	score += roundi(int(stat["score"]) * combo_multiplier())
 	if not drops:
 		pickups.drop(z.position, "coin", int(stat["coins"]))
@@ -699,7 +911,12 @@ func _finish_game(reason: String) -> void:
 	score = floori(score * score_mult + 0.001)
 	if victory:
 		Save.unlock_danger(danger + 1)
+		_endless_recorded_victory = true
+	if endless:
+		Save.record_endless(wave)
 	result_rank = Save.submit(score, wave, kills, victory, danger, contracts, score_mult)
+	if not Harness.automated():
+		Save.clear_resume_run()
 	Harness.on_game_over(self)
 
 
@@ -812,7 +1029,10 @@ func shop_can_buy(item: Dictionary) -> bool:
 
 
 func shop_buy(id: String) -> bool:
-	return Shop.buy(self, id)
+	if not Shop.buy(self, id):
+		return false
+	_save_resume_state()
+	return true
 
 
 func after_repair() -> void:
@@ -838,10 +1058,7 @@ func try_place_turret(cell: int) -> bool:
 	if coins < cost or not map.can_place_turret(cell):
 		Sfx.play("deny")
 		return false
-	var t: Node2D = TurretScene.instantiate()
-	entities.add_child(t)
-	t.setup(self, map, cell)
-	turrets.append(t)
+	var t := _add_turret(cell)
 	spend_coins(cost)
 	Sfx.play("buy")
 	fx.dust(t.position, 8)
@@ -849,7 +1066,16 @@ func try_place_turret(cell: int) -> bool:
 		state = State.SHOP
 		Mobile.reset_placement(Vector2.ZERO, false)
 		shop_ui.open()
+	_save_resume_state()
 	return true
+
+
+func _add_turret(cell: int) -> Node2D:
+	var t: Node2D = TurretScene.instantiate()
+	entities.add_child(t)
+	t.setup(self, map, cell)
+	turrets.append(t)
+	return t
 
 
 # ---------------------------------------------------------------------------

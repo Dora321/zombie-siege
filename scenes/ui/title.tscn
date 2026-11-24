@@ -38,6 +38,16 @@ offset_right = 200.0
 offset_bottom = 230.0
 theme_override_constants/separation = 5
 
+[node name="ResumeButton" type="Button" parent="Content/Menu"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(120, 19)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.38, 1)
+theme_override_colors/font_focus_color = Color(1, 0.88, 0.38, 1)
+theme_override_colors/font_hover_color = Color(1, 0.94, 0.62, 1)
+text = "继续行动"
+
 [node name="StartButton" type="Button" parent="Content/Menu"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 19)

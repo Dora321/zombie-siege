@@ -9,6 +9,7 @@ const COL_DIM := Color(0, 0, 0, 0.55)
 const BOSS_BAR_W := 200.0
 const BAR_TOUCH_PADDING := 3.0
 const TOUCH_MINIMAP_TOP := 46.0
+const THROWABLE_RADII := {"frag": 44.0, "sticky": 38.0, "flash": 84.0, "decoy": 72.0}
 
 var game: Node
 var _title := ""
@@ -143,6 +144,9 @@ func _draw() -> void:
 	_touch = Mobile.is_touch()
 	var in_shop: bool = game.state == game.State.SHOP
 	_draw_vignette()
+	var throwable_aiming: bool = _touch and Mobile.item_aiming and game.player_can_act() and not get_tree().paused
+	if throwable_aiming:
+		_draw_throwable_aim()
 	if not in_shop:
 		_draw_status()
 		_draw_wave_info()
@@ -164,7 +168,7 @@ func _draw() -> void:
 		Art.draw_text(self, "基地遭到攻击！", Vector2(_view_size.x * 0.5, _safe_rect.position.y + alert_y), 12, Color("#ff7050"), 1)
 	if game.state == game.State.PLACING:
 		_draw_placement()
-	elif game.player_can_act() and not get_tree().paused:
+	elif game.player_can_act() and not get_tree().paused and not throwable_aiming:
 		_draw_crosshair()
 
 
@@ -195,6 +199,14 @@ func _draw_status() -> void:
 	# 冲刺冷却
 	var dash_ratio: float = 1.0 - clampf(p.dash_cd / p.dash_cd_base, 0.0, 1.0)
 	_bar(Rect2(15, 26, 36, 2), dash_ratio, Color("#60d0e0") if dash_ratio >= 1.0 else Color("#3a7a88"))
+	if _touch and Save.auto_fire_on:
+		var label := "自动开火"
+		var width := Art.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		var pill := Color("#32433b")
+		draw_rect(Rect2(61, 23, width, 14), pill)
+		draw_circle(Vector2(61, 30), 7, pill)
+		draw_circle(Vector2(61 + width, 30), 7, pill)
+		Art.draw_text(self, label, Vector2(61, 23), 12, Color("#bce8a8"))
 	_draw_buffs(p)
 	draw_set_transform(Vector2.ZERO)
 
@@ -215,10 +227,13 @@ func _draw_buffs(p: Variant) -> void:
 func _draw_wave_info() -> void:
 	var left: int = game.zombies.size() + game._queue.size()
 	var top_center := Vector2(_view_size.x * 0.5, _safe_rect.position.y)
-	Art.draw_text(self, "第 %d / %d 波" % [game.wave, GameData.MAX_WAVE], top_center + Vector2(0, 2), 12, Color("#f0ece0"), 1)
+	var label := "无尽 第 %d 波" % game.wave if game.endless else "第 %d / %d 波" % [game.wave, GameData.MAX_WAVE]
+	var color := Color("#ffe060") if game.endless else Color("#f0ece0")
+	Art.draw_text(self, label, top_center + Vector2(0, 2), 12, color, 1)
 	# 危险等级和契约倍率，跟在波数后面
 	if game.score_mult > 1.0:
-		Art.draw_text(self, "危%d %s" % [game.danger, GameData.mult_text(game.score_mult)], top_center + Vector2(38, 2), 12, Color("#ff9070"))
+		var label_end := Art.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x * 0.5 + 4.0
+		Art.draw_text(self, "危%d %s" % [game.danger, GameData.mult_text(game.score_mult)], top_center + Vector2(label_end, 2), 12, Color("#ff9070"))
 	draw_texture(Art.skull_tex, top_center + Vector2(-18, 18))
 	Art.draw_tiny(self, str(left), top_center + Vector2(-7, 20), Color("#f0a090"))
 	if not game.boss_list.is_empty():
@@ -492,6 +507,29 @@ func _draw_vignette() -> void:
 	draw_rect(Rect2(10, h - 16, w - 20, 6), c)
 	draw_rect(Rect2(10, 16, 6, h - 32), c)
 	draw_rect(Rect2(w - 16, 16, 6, h - 32), c)
+
+
+func _draw_throwable_aim() -> void:
+	var camera: Camera2D = game.camera
+	var canvas := camera.get_canvas_transform()
+	var hand: Vector2 = canvas * (game.player.global_position + Vector2(0, -7))
+	var target := (canvas * Mobile.item_aim_world).round()
+	var radius := float(THROWABLE_RADII.get(Mobile.item_aim_id, 0.0)) * canvas.x.length()
+	var color := Color(1.0, 0.25, 0.25, 0.6) if Mobile.item_aim_cancel else Color(1.0, 0.8, 0.3, 0.65)
+	var steps := maxi(4, ceili(hand.distance_to(target) / 9.0))
+	for i in range(1, steps):
+		var t := float(i) / steps
+		var dot := hand.lerp(target, t) - Vector2(0, 72.0 * t * (1.0 - t))
+		draw_rect(Rect2(dot.round(), Vector2(2, 2)), color)
+	if radius > 0.0:
+		draw_arc(target, radius, 0, TAU, 48, color, 1.0)
+	draw_circle(target, 2.0, color)
+	if Mobile.item_aim_cancel:
+		var label_pos := Vector2(
+			clampf(target.x, _safe_rect.position.x + 26.0, _safe_rect.end.x - 26.0),
+			maxf(target.y - 18.0, _safe_rect.position.y + 2.0)
+		)
+		Art.draw_text(self, "松手取消", label_pos, 12, Color("#ff8070"), 1)
 
 
 func _draw_crosshair() -> void:
