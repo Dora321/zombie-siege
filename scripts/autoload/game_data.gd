@@ -880,3 +880,156 @@ func event_allowed(id: String, wave: int) -> bool:
 	if wave_special(wave) != "":
 		return spec["slot"] != "weather" and id != "emp"
 	return true
+
+
+# ---------------------------------------------------------------------------
+# Sprint 3：肉鸽三选一天赋、多兵种炮塔、五大幸存者职业与 Boss 连战
+# ---------------------------------------------------------------------------
+
+const PERK_ORDER: Array[String] = [
+	"dash_arc", "dash_reset", "reload_nova", "last_stand",
+	"ricochet", "blast_suit", "turret_sync", "turret_nova",
+	"auto_repair", "vamp_armor", "gold_magnet", "overclock",
+]
+const PERKS := {
+	"dash_arc": {
+		"name": "雷霆冲刺", "tag": "冲刺", "color": "#80e0ff",
+		"desc": "冲刺瞬间向周围释放连锁电弧，麻痹并灼伤尸群",
+	},
+	"dash_reset": {
+		"name": "疾风追猎", "tag": "冲刺", "color": "#70f0c8",
+		"desc": "每次击杀减少冲刺冷却 0.28 秒，越战越灵活",
+	},
+	"reload_nova": {
+		"name": "换弹震波", "tag": "射击", "color": "#ffd070",
+		"desc": "开始换弹时释放环形震波，击退并震伤贴脸僵尸",
+	},
+	"last_stand": {
+		"name": "孤注一掷", "tag": "射击", "color": "#ff8860",
+		"desc": "弹匣最后 25% 子弹伤害 +60%，暴击金光爆发",
+	},
+	"ricochet": {
+		"name": "贯穿弹头", "tag": "射击", "color": "#ffe880",
+		"desc": "所有实弹额外穿透 +1 只僵尸且伤害 +12%",
+	},
+	"blast_suit": {
+		"name": "防爆装甲", "tag": "爆破", "color": "#ff9a50",
+		"desc": "免疫自己的手雷与榴弹自伤，且爆炸伤害 +15%",
+	},
+	"turret_sync": {
+		"name": "火力共振", "tag": "防线", "color": "#88f098",
+		"desc": "你开火时场上所有炮塔射速 +25%，火力叠加",
+	},
+	"turret_nova": {
+		"name": "自爆防线", "tag": "防线", "color": "#ff6a6a",
+		"desc": "炮塔被摧毁时触发大范围闪光眩晕与高伤自爆",
+	},
+	"auto_repair": {
+		"name": "维修无人机", "tag": "防线", "color": "#78d8ff",
+		"desc": "每 4 秒自动修复基地 +10 血及最残受损围墙与炮塔",
+	},
+	"vamp_armor": {
+		"name": "嗜血护甲", "tag": "生存", "color": "#c8d8f0",
+		"desc": "每击杀 10 只僵尸恢复 5 点护甲，持久续航",
+	},
+	"gold_magnet": {
+		"name": "黄金磁铁", "tag": "经济", "color": "#ffe060",
+		"desc": "拾取范围翻倍，且连杀达到 10 以上时金币 +30%",
+	},
+	"overclock": {
+		"name": "肾上腺素", "tag": "生存", "color": "#e0a0ff",
+		"desc": "移动速度 +12%，所有武器换弹速度加快 25%",
+	},
+}
+
+
+func roll_perks(owned: Array[String], rng: RandomNumberGenerator, count := 3) -> Array[String]:
+	var pool: Array[String] = []
+	for id: String in PERK_ORDER:
+		if not owned.has(id):
+			pool.append(id)
+	var out: Array[String] = []
+	while out.size() < count and not pool.is_empty():
+		var idx := rng.randi_range(0, pool.size() - 1)
+		out.append(pool[idx])
+		pool.remove_at(idx)
+	return out
+
+
+const TURRET_ORDER: Array[String] = ["mg", "frost", "mortar", "tesla"]
+const TURRET_TYPES := {
+	"mg": {
+		"name": "机枪炮塔", "short": "机枪", "cost_mult": 1.0, "range_base": 118.0, "range_step": 16.0,
+		"color": "#a0f0ff", "desc": "高射速单体连射，稳定收割跑怪与破盾",
+	},
+	"frost": {
+		"name": "冰霜炮塔", "short": "冰霜", "cost_mult": 1.15, "range_base": 106.0, "range_step": 14.0,
+		"color": "#7ce8ff", "desc": "发射寒冰弹减速冻结，触发炮塔易伤联动",
+	},
+	"mortar": {
+		"name": "迫击炮塔", "short": "迫击炮", "cost_mult": 1.3, "range_base": 164.0, "range_step": 18.0,
+		"color": "#ffb050", "desc": "无视围墙抛射范围爆炸，清群且逼钻地出土",
+	},
+	"tesla": {
+		"name": "磁暴电塔", "short": "电塔", "cost_mult": 1.25, "range_base": 122.0, "range_step": 14.0,
+		"color": "#c896ff", "desc": "释放连跳电弧压制尸群，暴雨湿身伤害翻倍",
+	},
+}
+
+
+const HERO_ORDER: Array[String] = ["captain", "demo", "engineer", "elemental", "hunter"]
+const HEROES := {
+	"captain": {
+		"name": "特警队长", "hp": 100.0, "tint": "#ffffff",
+		"desc": "经典均衡：标准 100 生命，手枪/霰弹/冲锋齐备",
+	},
+	"demo": {
+		"name": "爆破专家", "hp": 105.0, "tint": "#ffc4a0",
+		"desc": "自带榴弹枪与 2 颗手雷，爆炸范围 +20%，自伤减半",
+	},
+	"engineer": {
+		"name": "战地工程师", "hp": 90.0, "tint": "#a8f0b8",
+		"desc": "炮塔造价 -25%、上限 +2、修墙 -40%，开局多 40 金币",
+	},
+	"elemental": {
+		"name": "元素特工", "hp": 95.0, "tint": "#a8e4ff",
+		"desc": "自带冰冻枪与粘弹，冰火持续 +0.6 秒，元素伤害 +20%",
+	},
+	"hunter": {
+		"name": "暗影猎手", "hp": 85.0, "tint": "#e0b8ff",
+		"desc": "自带回旋镖，移速 +15%，冲刺冷却缩短 40%",
+	},
+}
+
+
+const BOSS_RUSH_ORDER: Array[String] = [
+	"vanguard", "boss", "colossus", "mother", "graveborn", "burrowlord", "mirror", "overlord",
+]
+const BOSS_RUSH_START_COINS := 360
+
+
+func boss_rush_wave_count() -> int:
+	return BOSS_RUSH_ORDER.size()
+
+
+func boss_rush_wave_name(wave: int) -> String:
+	var idx := clampi(wave - 1, 0, BOSS_RUSH_ORDER.size() - 1)
+	var kind := BOSS_RUSH_ORDER[idx]
+	return "连战 · %s" % String(BOSSES[kind]["title"])
+
+
+func build_boss_rush_queue(wave: int, rng: RandomNumberGenerator) -> Array[String]:
+	var idx := clampi(wave - 1, 0, BOSS_RUSH_ORDER.size() - 1)
+	var boss_kind := BOSS_RUSH_ORDER[idx]
+	var q: Array[String] = [boss_kind]
+	var escort_count := 4 + idx
+	var escorts: Array[String] = ["walker", "runner"]
+	if idx >= 2:
+		escorts.append("spitter")
+	if idx >= 4:
+		escorts.append("shielder")
+	if idx >= 6:
+		escorts.append("screamer")
+	for _i in escort_count:
+		q.append(escorts[rng.randi_range(0, escorts.size() - 1)])
+	return q

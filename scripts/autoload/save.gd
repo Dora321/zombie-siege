@@ -17,8 +17,11 @@ var map_id := "ruins"
 ## 上次选的危险等级和契约，同样沿用；max_danger 是已解锁的最高危险等级（通关上一级解锁）。
 var danger := 0
 var contracts: Array[String] = []
+var hero_id := "captain"
+var game_mode := "normal"
 var max_danger := 0
 var best_endless_wave := 0
+var best_boss_rush_time := 0.0
 ## 点击标题界面的「继续行动」时载入，由 game.gd 在 _ready() 消费并清空。
 var pending_resume: Dictionary = {}
 
@@ -45,7 +48,10 @@ func load_all() -> void:
 	map_id = saved_map if GameData.MAPS.has(saved_map) else "ruins"
 	max_danger = clampi(int(cfg.get_value("records", "max_danger", 0)), 0, GameData.MAX_DANGER)
 	best_endless_wave = maxi(int(cfg.get_value("records", "best_endless_wave", 0)), 0)
+	best_boss_rush_time = maxf(float(cfg.get_value("records", "best_boss_rush_time", 0.0)), 0.0)
 	danger = clampi(int(cfg.get_value("run", "danger", 0)), 0, max_danger)
+	var saved_hero := String(cfg.get_value("run", "hero", "captain"))
+	hero_id = saved_hero if GameData.HEROES.has(saved_hero) else "captain"
 	contracts.clear()
 	var saved_contracts: Variant = cfg.get_value("run", "contracts", [])
 	if saved_contracts is Array:
@@ -66,9 +72,11 @@ func save_all() -> void:
 	cfg.set_value("settings", "map", map_id)
 	cfg.set_value("run", "danger", danger)
 	cfg.set_value("run", "contracts", contracts)
+	cfg.set_value("run", "hero", hero_id)
 	cfg.set_value("records", "scores", scores)
 	cfg.set_value("records", "max_danger", max_danger)
 	cfg.set_value("records", "best_endless_wave", best_endless_wave)
+	cfg.set_value("records", "best_boss_rush_time", best_boss_rush_time)
 	cfg.save(path)
 
 
@@ -117,9 +125,20 @@ func record_endless(wave: int) -> bool:
 	return true
 
 
+func record_boss_rush(seconds: float) -> bool:
+	if seconds <= 0.0:
+		return false
+	if best_boss_rush_time > 0.0 and seconds >= best_boss_rush_time:
+		return false
+	best_boss_rush_time = seconds
+	save_all()
+	return true
+
+
 func clear_scores() -> void:
 	scores.clear()
 	best_endless_wave = 0
+	best_boss_rush_time = 0.0
 	save_all()
 
 
