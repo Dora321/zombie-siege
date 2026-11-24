@@ -13,6 +13,7 @@ const TOUCH_HELP := """左摇移动，右摇瞄准并开火
 精英的克制办法见「僵尸图鉴」"""
 
 @onready var content: Control = %Content
+@onready var resume_button: Button = %ResumeButton
 @onready var start_button: Button = %StartButton
 @onready var help_button: Button = %HelpButton
 @onready var bestiary_button: Button = %BestiaryButton
@@ -47,6 +48,7 @@ func _ready() -> void:
 		_bg_map[i] = randi() % _bg_tiles.size()
 	for i in 12:
 		_walkers.append(_new_walker(randf_range(-20.0, size.x + 20.0)))
+	resume_button.pressed.connect(_on_resume)
 	start_button.pressed.connect(_on_start)
 	help_button.pressed.connect(_on_help)
 	bestiary_button.pressed.connect(_on_bestiary)
@@ -62,7 +64,7 @@ func _ready() -> void:
 		Sfx.play("ui_click")
 		_focus_start())
 	var touch := Mobile.is_touch()
-	for b: Button in [start_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
+	for b: Button in [resume_button, start_button, help_button, bestiary_button, clear_button, quit_button, help_close]:
 		if touch:
 			b.focus_mode = Control.FOCUS_NONE
 			b.custom_minimum_size.y = 22.0
@@ -77,6 +79,7 @@ func _ready() -> void:
 	resized.connect(_fit_content)
 	_fit_content()
 	_refresh_scores()
+	_refresh_resume()
 	_focus_start()
 	if Sfx.audio_unlocked:
 		Sfx.play_music("menu")
@@ -103,7 +106,8 @@ func _fit_content() -> void:
 
 func _focus_start() -> void:
 	if not Mobile.is_touch():
-		start_button.grab_focus()
+		var first := resume_button if resume_button.visible else start_button
+		first.grab_focus()
 
 
 ## 网页版的第一次点击或按键只用来解锁音频，不触发下面的菜单。
@@ -133,10 +137,9 @@ func _new_walker(x: float) -> Dictionary:
 
 
 func _refresh_scores() -> void:
-	if Save.scores.is_empty():
-		scores_label.text = "排行榜\n暂无记录\n\n基地被毁或玩家阵亡\n都算失败，撑过 %d 波即胜利" % GameData.MAX_WAVE
-		return
 	var lines: Array[String] = ["排行榜"]
+	if Save.scores.is_empty():
+		lines.append("暂无记录\n\n基地被毁或玩家阵亡\n都算失败，撑过 %d 波即胜利" % GameData.MAX_WAVE)
 	for i in Save.scores.size():
 		var s: Dictionary = Save.scores[i]
 		var line := "%d. %d 分  第%d波%s" % [i + 1, int(s["score"]), int(s["wave"]), " 胜" if bool(s.get("victory", false)) else ""]
@@ -145,7 +148,29 @@ func _refresh_scores() -> void:
 		if int(s.get("danger", 0)) > 0 or mult > 1.0:
 			line += "  危%d %s" % [int(s.get("danger", 0)), GameData.mult_text(mult)]
 		lines.append(line)
+	if Save.best_endless_wave > 0:
+		lines.append("无尽最高：第 %d 波" % Save.best_endless_wave)
 	scores_label.text = "\n".join(lines)
+
+
+func _refresh_resume() -> void:
+	var summary: Dictionary = {} if Harness.automated() else Save.load_resume_summary()
+	resume_button.visible = not summary.is_empty()
+	var menu: VBoxContainer = resume_button.get_parent()
+	menu.add_theme_constant_override("separation", 2 if resume_button.visible else 5)
+	if resume_button.visible:
+		var next_wave := int(summary["wave"]) + 1
+		resume_button.text = ("继续无尽第 %d 波" if bool(summary["endless"]) else "继续第 %d 波") % next_wave
+
+
+func _on_resume() -> void:
+	Save.pending_resume = Save.load_resume_run()
+	if Save.pending_resume.is_empty():
+		_refresh_resume()
+		_focus_start()
+		return
+	Sfx.play("ui_click")
+	get_tree().change_scene_to_file("res://scenes/game.tscn")
 
 
 func _on_start() -> void:
@@ -161,6 +186,7 @@ func _on_map_chosen(id: String) -> void:
 
 
 func start_game(id: String) -> void:
+	Save.clear_resume_run()
 	Save.map_id = id
 	Save.save_all()
 	get_tree().change_scene_to_file("res://scenes/game.tscn")

@@ -7,6 +7,7 @@ var game: Node
 @onready var reason_label: Label = %ReasonLabel
 @onready var stats_label: Label = %StatsLabel
 @onready var record_label: Label = %RecordLabel
+@onready var endless_button: Button = %EndlessButton
 @onready var retry_button: Button = %RetryButton
 @onready var title_button: Button = %BackButton
 
@@ -14,6 +15,7 @@ var game: Node
 func setup(g: Node) -> void:
 	game = g
 	visible = false
+	endless_button.pressed.connect(_continue_endless)
 	retry_button.pressed.connect(_retry)
 	title_button.pressed.connect(_back)
 
@@ -22,8 +24,12 @@ func open() -> void:
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var won: bool = game.victory
+	endless_button.visible = won and not game.endless and not Harness.automated()
 	title_label.text = "胜利！" if won else "城破了"
 	title_label.modulate = Color("#ffe080") if won else Color("#ff6a50")
+	if game.endless:
+		title_label.text = "无尽止步"
+		title_label.modulate = Color("#ff985e")
 	reason_label.text = game.end_reason
 	var fired: int = game.bullets.shots_fired
 	var accuracy := 0 if fired == 0 else roundi(float(game.bullets.shots_hit) / fired * 100.0)
@@ -36,8 +42,13 @@ func open() -> void:
 	var map_txt := String(GameData.MAPS[game.map.map_id]["name"])
 	if game.danger > 0:
 		map_txt += " 危%d" % game.danger
-	stats_label.text = "最终分数  %s\n地图 %s  坚持波次  %d / %d\n击杀僵尸  %d    最高连杀  %d\n命中率  %d%%    战斗时长  %d:%02d\n累计金币  %d" % [
-		score_txt, map_txt, game.wave, GameData.MAX_WAVE, game.kills, game.best_combo,
+	var wave_txt := "坚持波次  %d / %d" % [game.wave, GameData.MAX_WAVE]
+	if game.endless:
+		wave_txt = "\n无尽波次  第 %d 波（最高 %d 波）" % [game.wave, Save.best_endless_wave]
+	else:
+		wave_txt = "  " + wave_txt
+	stats_label.text = "最终分数  %s\n地图 %s%s\n击杀僵尸  %d    最高连杀  %d\n命中率  %d%%    战斗时长  %d:%02d\n累计金币  %d" % [
+		score_txt, map_txt, wave_txt, game.kills, game.best_combo,
 		accuracy, minutes, seconds, game.coins_earned,
 	]
 	if game.result_rank == 1:
@@ -49,7 +60,13 @@ func open() -> void:
 	else:
 		record_label.text = "历史最高分 %d" % Save.best_score()
 		record_label.modulate = Color("#c8c4b8")
-	retry_button.grab_focus()
+	var first := endless_button if endless_button.visible else retry_button
+	first.grab_focus()
+
+
+func _continue_endless() -> void:
+	Sfx.play("ui_click")
+	game.continue_endless()
 
 
 func _retry() -> void:
