@@ -116,6 +116,22 @@ const EVOLUTIONS := {
 		"desc": "穿盾不减伤，打重甲 +20%",
 		"need": {"item": "sticky", "consume": 1, "kills": {"kinds": ["tank", "shielder", "colossus"], "count": 8}},
 	},
+	"twin_handgun": {
+		"base": "pistol", "name": "双持手炮", "counter": "稳定输出：双发穿透清怪",
+		"desc": "双发齐射，伤害 +25%，多穿 1 只", "need": {"item": "armor", "consume": 0, "used": true},
+	},
+	"dragon_breath": {
+		"base": "shotgun", "name": "龙息霰弹", "counter": "再生坟主、贴脸尸潮",
+		"desc": "弹丸附带燃烧与强击退，压制再生", "need": {"item": "frag", "consume": 1, "used": true},
+	},
+	"pulse_minigun": {
+		"base": "smg", "name": "脉冲加特林", "counter": "高频压制、密集尸潮",
+		"desc": "持续开火射速递增至 1.45 倍并强击退", "need": {"item": "speed", "consume": 0, "used": true},
+	},
+	"blue_furnace": {
+		"base": "flamer", "name": "蓝焰熔炉", "counter": "覆甲巨像、坦克、再生坟主",
+		"desc": "高温蓝焰无视低伤减甲，射程更远且留长火", "need": {"item": "inf_ammo", "consume": 0, "used": true},
+	},
 }
 ## 冰封雷：每只身上同时只挂一颗，FUSE 秒后在它身上炸开，半径内全体上冰，伤害是这发冰弹的倍数。
 const FROST_MINE_FUSE := 0.6
@@ -549,6 +565,13 @@ const WAVES := [
 	{"name": "最终围城", "walker": 22, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "shielder": 3, "stalker": 3, "overlord": 1},
 ]
 
+const ENDLESS_BOSSES: Array[String] = ["colossus", "mother", "grave", "burrower", "empress", "butcher"]
+## 无尽波的 Boss 名称映射到现有僵尸种类，沿用原本的素材和阶段配置。
+const ENDLESS_BOSS_SPAWN := {
+	"colossus": "colossus", "mother": "plague", "grave": "graveborn", "burrower": "burrowlord",
+	"empress": "mirror", "butcher": "boss", "king": "overlord",
+}
+
 
 func weapon_stats(id: String, level: int) -> Dictionary:
 	var s: Dictionary = WEAPONS[id].duplicate()
@@ -628,6 +651,67 @@ func build_spawn_queue(wave: int) -> Array[String]:
 	return queue
 
 
+func endless_hp_mult(wave: int) -> float:
+	return 1.0 if wave <= MAX_WAVE else pow(1.13, float(wave - MAX_WAVE))
+
+
+func endless_speed_mult(wave: int) -> float:
+	return minf(1.4, 1.0 + 0.025 * float(maxi(wave - MAX_WAVE, 0)))
+
+
+func endless_boss_kinds(wave: int) -> Array[String]:
+	if wave <= MAX_WAVE:
+		return []
+	if wave % 5 == 0:
+		return ["king"]
+	if wave % 2 != 0:
+		return []
+	var round_index := (wave - MAX_WAVE - 1) / 2
+	var first := round_index % ENDLESS_BOSSES.size()
+	var offset := 1 + (round_index / ENDLESS_BOSSES.size()) % (ENDLESS_BOSSES.size() - 1)
+	return [ENDLESS_BOSSES[first], ENDLESS_BOSSES[(first + offset) % ENDLESS_BOSSES.size()]]
+
+
+## 每波都有所有精英类型，杂兵占多数，远程与重型敌人的数量增长较慢。
+func build_endless_queue(wave: int, rng: RandomNumberGenerator) -> Array[String]:
+	var queue: Array[String] = []
+	if wave <= MAX_WAVE:
+		return queue
+	var cfg := _endless_spawn_config(wave)
+	for kind: String in cfg.keys():
+		if is_boss(kind):
+			continue
+		for i in spawn_count(cfg, kind):
+			queue.append(kind)
+	for i in range(queue.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var kind := queue[i]
+		queue[i] = queue[j]
+		queue[j] = kind
+	# 出怪从队尾取。两位 Boss 错开几批出现，场上仍会重叠。
+	var boss_index := 0
+	for kind: String in endless_boss_kinds(wave):
+		queue.insert(queue.size() / 2 - boss_index * 8, String(ENDLESS_BOSS_SPAWN[kind]))
+		boss_index += 1
+	return queue
+
+
+func _endless_spawn_config(wave: int) -> Dictionary:
+	var extra := wave - MAX_WAVE
+	var cfg := {
+		"walker": 28 + extra, "runner": 19 + extra, "spitter": 6 + extra / 3,
+		"exploder": 7 + extra / 3, "tank": 3 + extra / 4,
+	}
+	var elite_index := 0
+	for kind: String in ZOMBIES.keys():
+		if bool(ZOMBIES[kind].get("elite", false)):
+			cfg[kind] = 2 + (extra + elite_index) / 6
+			elite_index += 1
+	for kind: String in endless_boss_kinds(wave):
+		cfg[ENDLESS_BOSS_SPAWN[kind]] = 1
+	return cfg
+
+
 ## 一波里某种杂兵出几只。当前地图的 count_scale 和尸潮契约只缩放普通僵尸；
 ## 精英是逐波设计好的，只有高危险等级给已有的精英加只数。
 func spawn_count(cfg: Dictionary, kind: String) -> int:
@@ -646,7 +730,7 @@ func spawn_count(cfg: Dictionary, kind: String) -> int:
 ## 商店情报：这一波叫什么、提示、有哪些怪（最多 5 项，多的并成「其他」）、Boss 是谁。
 ## 有弱点标签的怪（精英、坦克）优先列出，普通杂兵按数量补齐。
 func wave_preview(wave: int) -> Dictionary:
-	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
+	var cfg: Dictionary = _endless_spawn_config(wave) if wave > MAX_WAVE else WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
 	var boss_kind := ""
 	var all: Array = []
 	for kind: String in ZOMBIES.keys():
@@ -751,6 +835,8 @@ func wave_hint(wave: int) -> String:
 
 
 func wave_name(wave: int) -> String:
+	if wave > MAX_WAVE:
+		return "无尽围城"
 	return String(WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]["name"])
 
 
@@ -775,6 +861,8 @@ func wave_bonus(wave: int) -> int:
 
 
 func boss_wave(wave: int) -> bool:
+	if wave > MAX_WAVE:
+		return not endless_boss_kinds(wave).is_empty()
 	var cfg: Dictionary = WAVES[clampi(wave - 1, 0, WAVES.size() - 1)]
 	for kind: String in BOSSES.keys():
 		if cfg.has(kind):

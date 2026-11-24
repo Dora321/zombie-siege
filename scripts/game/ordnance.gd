@@ -8,6 +8,8 @@ const MAX_FIRES := 32
 const FIRE_TICK := 0.2
 const FIRE_DPS := 14.0
 const FIRE_TIME := 2.4
+const BLUE_FIRE_TIME := 6.0
+const BLUE_FLAME_COLORS: Array[Color] = [Color("#d9fbff"), Color("#5eeaff"), Color("#249bff"), Color("#3265ff")]
 const FIRE_R := 11.0
 const FUSE := {"frag": 0.55, "sticky": 1.5, "flash": 0.35}
 const STICK_R := 20.0
@@ -44,6 +46,7 @@ class Bomb:
 class Fire:
 	var pos: Vector2
 	var t: float
+	var blue := false
 
 
 class Rang:
@@ -175,10 +178,23 @@ func _detonate_barrels(from: Vector2, to: Vector2) -> void:
 # ---------------------------------------------------------------------------
 
 func flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage: float) -> void:
+	_flame(from, dir, length, cone_deg, damage, false)
+
+
+func flame_blue(origin: Vector2, dir: Vector2, max_range: float, cone_deg: float, damage: float) -> void:
+	_flame(origin, dir, max_range, cone_deg, damage, true)
+
+
+func _flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage: float, blue: bool) -> void:
 	game.bullets.shots_fired += 1
-	game.fx.flame(from, dir, length, deg_to_rad(cone_deg))
+	var cone := deg_to_rad(cone_deg)
+	if blue:
+		_blue_flame_fx(from, dir, length, cone)
+	else:
+		game.fx.flame(from, dir, length, cone)
 	var ground: Vector2 = from + GROUND_OFFSET
-	var cone_slope := tan(deg_to_rad(cone_deg))
+	var cone_slope := tan(cone)
+	var src := "blue_flame" if blue else "tick"
 	var hit_any := false
 	for z: Variant in game.zombies_near(from, length + 16.0):
 		if z.dead:
@@ -193,8 +209,8 @@ func flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage: 
 			continue
 		if not map.line_clear(ground, z.position, map.BLOCK_BULLET):
 			continue
-		z.take_tick(damage)
-		z.ignite(1.6)
+		z.take_tick(damage, src)
+		z.ignite(1.6, blue)
 		hit_any = true
 	if hit_any:
 		game.bullets.shots_hit += 1
@@ -202,21 +218,42 @@ func flame(from: Vector2, dir: Vector2, length: float, cone_deg: float, damage: 
 	_detonate_barrels(from, from + dir * length)
 	_flame_count += 1
 	if _flame_count % 3 == 0:
-		add_fire(ground + dir * length * randf_range(0.55, 1.0) + dir.orthogonal() * randf_range(-8.0, 8.0))
+		var pos := ground + dir * length * randf_range(0.55, 1.0) + dir.orthogonal() * randf_range(-8.0, 8.0)
+		add_fire(pos, BLUE_FIRE_TIME if blue else FIRE_TIME, blue)
 
 
-func add_fire(pos: Vector2, seconds := FIRE_TIME) -> void:
+func _blue_flame_fx(origin: Vector2, dir: Vector2, length: float, cone: float) -> void:
+	for i in BLUE_FLAME_COLORS.size():
+		# 使用现有特效粒子池，和普通火焰共用绘制与数量上限。
+		var p: Variant = game.fx._spawn()
+		p.x = origin.x
+		p.y = origin.y + GROUND_OFFSET.y
+		p.z = GROUND_OFFSET.y
+		p.life = randf_range(0.14, 0.28)
+		var velocity := dir.rotated(randf_range(-cone, cone)) * length / float(p.life) * randf_range(0.55, 1.0)
+		p.vx = velocity.x
+		p.vy = velocity.y
+		p.vz = randf_range(0.0, 20.0)
+		p.gravity = 0.0
+		p.size = 3 if i <= 1 else 2
+		p.color = BLUE_FLAME_COLORS[i]
+
+
+func add_fire(pos: Vector2, seconds := FIRE_TIME, blue := false) -> void:
 	if map.blocks(map.cell_of(pos), map.BLOCK_BULLET):
 		return
 	for f in fires:
 		if f.pos.distance_squared_to(pos) < 36.0:
-			f.t = maxf(f.t, seconds)
+			if blue or not f.blue:
+				f.t = maxf(f.t, seconds)
+				f.blue = blue
 			return
 	if fires.size() >= MAX_FIRES:
 		fires.remove_at(0)
 	var f := Fire.new()
 	f.pos = pos
 	f.t = seconds
+	f.blue = blue
 	fires.append(f)
 	game.decals.stamp_pixel_group(pos, Color(0.09, 0.08, 0.08, 0.7), 5)
 
@@ -698,10 +735,11 @@ func _update_fires(dt: float) -> void:
 		if f.t <= 0.0:
 			fires.remove_at(i)
 		elif tick:
+			var src := "blue_flame" if f.blue else "tick"
 			for z: Variant in game.zombies_near(f.pos, FIRE_R + 16.0):
 				if not z.dead and z.position.distance_squared_to(f.pos) < FIRE_R * FIRE_R:
-					z.take_tick(FIRE_DPS * FIRE_TICK)
-					z.ignite(1.0)
+					z.take_tick(FIRE_DPS * FIRE_TICK, src)
+					z.ignite(1.0, f.blue)
 		i -= 1
 
 
@@ -818,14 +856,18 @@ func _draw_aim_guides() -> void:
 
 func _draw_fire(f: Fire) -> void:
 	var fade := clampf(f.t, 0.0, 1.0)
-	draw_circle(f.pos.round(), FIRE_R * 0.8, Color(0.9, 0.3, 0.05, 0.16 * fade))
+	var glow := Color(0.08, 0.55, 1.0, 0.24 * fade) if f.blue else Color(0.9, 0.3, 0.05, 0.16 * fade)
+	var base := BLUE_FLAME_COLORS[2] if f.blue else Color("#ff9030")
+	var edge := BLUE_FLAME_COLORS[1] if f.blue else Color("#ffd050")
+	var tip := BLUE_FLAME_COLORS[0] if f.blue else Color("#fff0a0")
+	draw_circle(f.pos.round(), FIRE_R * 0.8, glow)
 	var frame := int(f.t * 12.0)
 	for k in 5:
 		var a := float(k) * 2.4 + f.pos.x
 		var at: Vector2 = f.pos + Vector2(cos(a), sin(a) * 0.6) * FIRE_R * 0.7
 		var h := 2 + (frame + k) % 3
-		draw_rect(Rect2(at.round() - Vector2(0, h), Vector2(2, h)), Color("#ff9030") if k % 2 == 0 else Color("#ffd050"))
-		draw_rect(Rect2(at.round() - Vector2(0, h + 1), Vector2(1, 1)), Color("#fff0a0"))
+		draw_rect(Rect2(at.round() - Vector2(0, h), Vector2(2, h)), base if k % 2 == 0 else edge)
+		draw_rect(Rect2(at.round() - Vector2(0, h + 1), Vector2(1, 1)), tip)
 
 
 func _draw_decoy(d: Decoy) -> void:

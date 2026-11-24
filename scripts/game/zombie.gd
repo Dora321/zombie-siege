@@ -87,6 +87,7 @@ var _chill_t := 0.0
 var _frozen_t := 0.0
 var _stun_t := 0.0
 var _burn_t := 0.0
+var _blue_burn_t := 0.0
 # 元素联动：湿身、碎冰的解冻倒计时（-1 表示没在碎）、淬火
 var _wet_t := 0.0
 var _shatter_t := -1.0
@@ -554,6 +555,7 @@ func apply_chill(amount: float) -> void:
 	# 先燃后冻：冰把火浇灭的这一下淬火
 	var was_burning := _burn_t > 0.0
 	_burn_t = 0.0
+	_blue_burn_t = 0.0
 	_chill_t = GameData.CHILL_TIME + _status_bonus()
 	_chill += amount
 	if _chill >= 1.0 and not is_boss and _frozen_t <= 0.0:
@@ -602,10 +604,13 @@ func stun(seconds: float) -> void:
 		_brain.on_stun(self)
 
 
-func ignite(seconds: float) -> void:
+func ignite(seconds: float, blue := false) -> void:
 	if dead:
 		return
-	_burn_t = maxf(_burn_t, seconds + _status_bonus())
+	var duration := seconds + _status_bonus()
+	_burn_t = maxf(_burn_t, duration)
+	if blue:
+		_blue_burn_t = maxf(_blue_burn_t, duration)
 	_chill = 0.0
 	_chill_t = 0.0
 	_frozen_t = 0.0
@@ -617,15 +622,15 @@ func _status_bonus() -> float:
 
 
 ## 火焰这类高频小伤害：不飘血不出声，攒够才飘一次字。
-func take_tick(amount: float) -> void:
+func take_tick(amount: float, src := "tick") -> void:
 	if dead:
 		return
 	var dealt := amount * vulnerability()
 	_calm_t = GameData.REGEN_DELAY
 	if _brain != null:
-		dealt = _brain.absorb(self, dealt, "tick")
+		dealt = _brain.absorb(self, dealt, src)
 		# 火每帧都在烧，弱点字隔久一点
-		if dealt > 0.0 and _brain.weak_hit(self, "tick", Vector2.ZERO):
+		if dealt > 0.0 and _brain.weak_hit(self, src, Vector2.ZERO):
 			cue("弱点！", CUE_WEAK, CUE_REPEAT * 2.0)
 	hp -= dealt
 	_dot_shown += dealt
@@ -654,12 +659,14 @@ func _tick_status(dt: float) -> void:
 	if _chill_t <= 0.0:
 		_chill = 0.0
 	if _burn_t > 0.0:
+		var src := "blue_flame" if _blue_burn_t > 0.0 else "tick"
 		_burn_t -= dt
+		_blue_burn_t = maxf(_blue_burn_t - dt, 0.0)
 		_ember_t -= dt
 		if _ember_t <= 0.0:
 			_ember_t = 0.14
 			game.fx.ember(center())
-		take_tick(GameData.BURN_DPS * dt)
+		take_tick(GameData.BURN_DPS * dt, src)
 		if dead:
 			return
 	if game.regen_on and not is_boss:
@@ -697,7 +704,7 @@ func _tick_regen(dt: float) -> void:
 
 
 ## 子弹、爆炸都走这里。src 标明伤害来源（bullet/buckshot/beam/arc/rang/blast/nuke），
-## Boss 的覆甲、钻地要看它；脚本直接扣血留空。
+## Boss 的覆甲、钻地要看它；蓝焰用 blue_flame，脚本直接扣血留空。
 func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "") -> void:
 	if dead:
 		return

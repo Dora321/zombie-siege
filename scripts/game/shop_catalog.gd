@@ -19,6 +19,7 @@ static func turret_cost(g: Node) -> int:
 static func items(g: Node) -> Array:
 	var p: Variant = g.player
 	var out: Array = []
+	var no_smg: bool = g.has_contract("no_smg")
 	# 武器：解锁要枪袋有空位；已解锁的可以卸下或装备（swap 是行里的第二个按钮），没带的枪照样能升级
 	for id: String in GameData.WEAPON_ORDER:
 		var state: Dictionary = p.weapon_state[id]
@@ -42,7 +43,8 @@ static func items(g: Node) -> Array:
 		}
 		# 满级后这一行变成进化：条件够了花一点钱原地进化，不够就写还差什么
 		var evo := GameData.evolution_of(id)
-		if maxed and evo != "":
+		var banned := id == "smg" and no_smg
+		if maxed and evo != "" and not banned:
 			var spec_evo: Dictionary = GameData.EVOLUTIONS[evo]
 			if p.evolution(id) != "":
 				item["desc"] = "已进化 · " + String(spec_evo["desc"])
@@ -60,7 +62,7 @@ static func items(g: Node) -> Array:
 			if not p.carries(id):
 				item["desc"] = "没带在身上 · " + String(item["desc"])
 		# 禁冲锋枪契约：冲锋枪这一行整行禁用
-		if id == "smg" and g.has_contract("no_smg"):
+		if banned:
 			item["locked"] = true
 			item["desc"] = "契约：本局禁用冲锋枪"
 			item["locked_text"] = "禁用"
@@ -72,6 +74,8 @@ static func items(g: Node) -> Array:
 		out.append(item)
 	# 弹药：只列已解锁且需要备弹的枪
 	for id: String in p.owned_weapons():
+		if id == "smg" and no_smg:
+			continue
 		var spec: Dictionary = GameData.WEAPONS[id]
 		if not spec.has("ammo_pack"):
 			continue
@@ -186,7 +190,8 @@ static func can_buy(g: Node, item: Dictionary) -> bool:
 ## 购买：成功返回 true。放炮塔不在这里扣钱，落地时才扣。装备和卸下不花钱。
 static func buy(g: Node, id: String) -> bool:
 	if id.begins_with("equip_"):
-		return g.player.equip(id.trim_prefix("equip_"))
+		var weapon := id.trim_prefix("equip_")
+		return not (weapon == "smg" and g.has_contract("no_smg")) and g.player.equip(weapon)
 	if id.begins_with("unequip_"):
 		return g.player.unequip(id.trim_prefix("unequip_"))
 	var item: Dictionary = {}

@@ -3,11 +3,14 @@ extends Node
 
 const RATE := 22050
 const POOL_SIZE := 18
+const MUSIC_VOLUME := -9.0
+const MUSIC_FADE_TIME := 0.22
+const MUSIC_FALLBACK := {"shop": "menu", "final_boss": "boss"}
 ## 同一音效的最短触发间隔（毫秒），避免冲锋枪和成群僵尸把声音叠爆。
 const MIN_GAP_MS := {
 	"hit": 45, "groan": 500, "casing": 60, "wall_hit": 110, "coin": 40, "smg": 40,
 	"turret": 70, "base_hit": 160, "ui_hover": 40, "flamer": 75, "arc": 60, "cryo": 60, "beep": 90,
-	"shield_block": 70, "rock_fall": 70, "summon_pop": 70, "charge_warn": 120, "balloon_pop": 60, "split": 60,
+	"shield_block": 70, "rock_fall": 70, "summon_pop": 70, "charge_warn": 120, "balloon_pop": 60, "split": 60, "kill": 45,
 }
 
 var _streams := {}
@@ -15,6 +18,8 @@ var _players: Array[AudioStreamPlayer] = []
 var _next_player := 0
 var _last_ms := {}
 var _music_a: AudioStreamPlayer
+var _music_b: AudioStreamPlayer
+var _music_fade: Tween
 var _music_streams := {}
 var _music_wanted := ""
 var _thread: Thread
@@ -35,10 +40,12 @@ func _ready() -> void:
 		_players.append(p)
 	_music_a = AudioStreamPlayer.new()
 	add_child(_music_a)
+	_music_b = AudioStreamPlayer.new()
+	add_child(_music_b)
 	_build_sfx()
 	# 背景音乐渲染较慢，放到后台线程，避免卡启动。
 	# 无线程的网页版没有后台线程，由 _render_song 分摊到多帧。
-	if OS.has_feature("threads"):
+	if not OS.has_feature("web") or OS.has_feature("threads"):
 		_thread = Thread.new()
 		_thread.start(_render_all_music)
 	else:
@@ -50,8 +57,9 @@ func _exit_tree() -> void:
 		_thread.wait_to_finish()
 		_thread = null
 	# 退出前释放正在播放的音频流，否则引擎会报资源泄漏
-	_music_a.stop()
+	_stop_music()
 	_music_a.stream = null
+	_music_b.stream = null
 	for p in _players:
 		p.stop()
 		p.stream = null
@@ -66,7 +74,7 @@ func _notification(what: int) -> void:
 
 ## 正常退出：先停掉所有声音，留一点时间让音频线程回收播放实例，再退出。
 func quit_game() -> void:
-	_music_a.stop()
+	_stop_music()
 	for p in _players:
 		p.stop()
 	await get_tree().create_timer(0.12, true, false, true).timeout
@@ -74,7 +82,7 @@ func quit_game() -> void:
 
 
 ## 播放音效。volume_db 为额外音量，jitter 为随机音高幅度。
-func play(sound: String, volume_db := 0.0, jitter := 0.06) -> void:
+func play(sound: String, volume_db := 0.0, jitter := 0.06, pitch := 1.0) -> void:
 	if _silent or not Save.sfx_on or not _streams.has(sound):
 		return
 	var now := Time.get_ticks_msec()
@@ -86,11 +94,15 @@ func play(sound: String, volume_db := 0.0, jitter := 0.06) -> void:
 	_next_player = (_next_player + 1) % POOL_SIZE
 	p.stream = _streams[sound]
 	p.volume_db = volume_db
-	p.pitch_scale = 1.0 + randf_range(-jitter, jitter)
+	p.pitch_scale = pitch + randf_range(-jitter, jitter)
 	p.play()
 
 
-## 切换背景音乐：menu（平静）/ combat（紧张）/ boss（Boss 战）/ 空串（停止）。
+func play_kill(combo: int) -> void:
+	play("kill", -6.0, 0.0, 1.0 + minf(float(combo), 20.0) * 0.022)
+
+
+## 切换背景音乐，空串停止。新曲目合成完成前可以先播放对应的旧曲目。
 func play_music(track: String) -> void:
 	_music_wanted = track
 	_apply_music()
@@ -104,15 +116,39 @@ func _apply_music() -> void:
 	if _silent:
 		return
 	if not Save.music_on or _music_wanted == "":
-		_music_a.stop()
+		_stop_music()
 		return
-	if not _music_streams.has(_music_wanted):
+	var s: AudioStream = _music_streams.get(_music_wanted)
+	if s == null:
+		s = _music_streams.get(MUSIC_FALLBACK.get(_music_wanted, ""))
+	if s == null or (_music_a.stream == s and _music_a.playing):
 		return
-	var s: AudioStream = _music_streams[_music_wanted]
+	if not _music_a.playing:
+		_music_a.stream = s
+		_music_a.volume_db = MUSIC_VOLUME
+		_music_a.play()
+		return
+	if _music_fade != null:
+		_music_fade.kill()
+	var outgoing := _music_a
+	_music_a = _music_b
+	_music_b = outgoing
 	if _music_a.stream != s or not _music_a.playing:
 		_music_a.stream = s
-		_music_a.volume_db = -9.0
+		_music_a.volume_db = -40.0
 		_music_a.play()
+	_music_fade = create_tween().set_ignore_time_scale(true)
+	_music_fade.tween_property(_music_a, "volume_db", MUSIC_VOLUME, MUSIC_FADE_TIME)
+	_music_fade.parallel().tween_property(_music_b, "volume_db", -40.0, MUSIC_FADE_TIME)
+	_music_fade.chain().tween_callback(_music_b.stop)
+
+
+func _stop_music() -> void:
+	if _music_fade != null:
+		_music_fade.kill()
+		_music_fade = null
+	_music_a.stop()
+	_music_b.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +226,12 @@ func _build_sfx() -> void:
 	b = _voice(b, 0, 0.13, 9000, 1400, "noise", 0.55)
 	b = _voice(b, 0, 0.09, 460, 90, "sq", 0.3)
 	_add("pistol", b)
+
+	b = _buf(0.09)
+	b = _voice(b, 0.0, 0.070, 390, 120, "tri", 0.64, 2.5)
+	b = _voice(b, 0.0, 0.036, 1700, 700, "sq", 0.18, 3.0)
+	b = _voice(b, 0.0, 0.024, 9500, 4200, "noise", 0.18, 3.0)
+	_add("kill", b)
 
 	b = _buf(0.36)
 	b = _voice(b, 0, 0.32, 7000, 350, "noise", 0.8, 2.2)
@@ -490,6 +532,10 @@ func _render_all_music() -> void:
 	_on_music_ready.call_deferred("combat", combat)
 	var boss: AudioStreamWAV = await _render_song(160.0, [40, 40, 43, 40, 36, 36, 38, 39], true)
 	_on_music_ready.call_deferred("boss", boss)
+	var shop: AudioStreamWAV = await _render_sprint_song(104.0, [45, 45, 50, 43, 45, 48, 50, 43], false)
+	_on_music_ready.call_deferred("shop", shop)
+	var final_boss: AudioStreamWAV = await _render_sprint_song(172.0, [40, 40, 41, 43, 36, 38, 41, 39], true)
+	_on_music_ready.call_deferred("final_boss", final_boss)
 
 
 func _on_music_ready(track: String, stream: AudioStreamWAV) -> void:
@@ -535,4 +581,47 @@ func _render_song(bpm: float, roots: Array, intense: bool) -> AudioStreamWAV:
 				b = _voice(b, t, 0.03, 9000, 7000, "noise", 0.06, 2.0)
 			elif s == 0:
 				b = _voice(b, t, 0.3, 90, 40, "sin", 0.28, 2.0)
+	return _wav(b, true)
+
+
+func _render_sprint_song(bpm: float, roots: Array[int], final_boss: bool) -> AudioStreamWAV:
+	var step := 60.0 / bpm / 4.0
+	var b := _buf(roots.size() * 16 * step)
+	var minor7 := [0, 3, 7, 10]
+	var chase := [0, 7, 12, 15, 12, 19, 15, 7]
+	for bar in roots.size():
+		if _thread == null:
+			await get_tree().process_frame
+		var root := roots[bar]
+		for s in 16:
+			var t := (bar * 16 + s) * step
+			if final_boss:
+				# 十六分音符低音持续推进，旋律在两个八度之间跳动。
+				var low := _midi(root - 12 + (12 if s % 4 == 3 else 0))
+				var lead := _midi(root + 12 + int(chase[(s + bar * 2) % chase.size()]))
+				b = _voice(b, t, step * 0.8, low, low, "sq", 0.21, 1.4)
+				b = _voice(b, t, step * 0.75, lead, lead, "sq", 0.075 if s % 2 == 0 else 0.043, 1.7)
+				if s % 4 == 0 or s == 11:
+					b = _voice(b, t, 0.11, 155, 36, "sin", 0.48, 2.4)
+				if s % 8 == 4:
+					b = _voice(b, t, 0.10, 6800, 2100, "noise", 0.16, 2.6)
+				b = _voice(b, t, 0.027, 9400, 7200, "noise", 0.046, 2.1)
+			else:
+				# 切分贝斯和轻短的小七和弦，鼓点在拍间留白。
+				if s in [0, 3, 6, 8, 11, 14]:
+					var low := _midi(root - 12 + (7 if s == 6 or s == 14 else 0))
+					b = _voice(b, t, step * 1.65, low, low, "tri", 0.24, 1.6)
+				if s == 2 or s == 10:
+					for interval: int in minor7:
+						var chord := _midi(root + 12 + interval)
+						b = _voice(b, t, step * 2.2, chord, chord, "tri", 0.045, 2.1)
+				if s == 5 or s == 13 or s == 15:
+					var answer := _midi(root + 24 + int(minor7[(bar + s) % minor7.size()]))
+					b = _voice(b, t, step * 0.85, answer, answer, "sq", 0.033, 2.0)
+				if s % 8 == 0:
+					b = _voice(b, t, 0.18, 95, 37, "sin", 0.31, 2.5)
+				if s % 8 == 4:
+					b = _voice(b, t, 0.08, 3800, 1500, "noise", 0.14, 2.6)
+				if s % 2 == 0:
+					b = _voice(b, t, 0.029, 6800, 5000, "noise", 0.043, 2.2)
 	return _wav(b, true)
