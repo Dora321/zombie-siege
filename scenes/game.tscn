@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/game/world_map.gd" id="2"]
@@ -14,6 +14,7 @@
 [ext_resource type="Script" path="res://scripts/game/hazards.gd" id="12"]
 [ext_resource type="Script" path="res://scripts/game/world_events.gd" id="13"]
 [ext_resource type="PackedScene" path="res://scenes/ui/touch_controls.tscn" id="14"]
+[ext_resource type="PackedScene" path="res://scenes/ui/perk_picker.tscn" id="15"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1")
@@ -57,6 +58,9 @@ process_callback = 0
 [node name="TouchControls" parent="UI" instance=ExtResource("14")]
 
 [node name="Shop" parent="UI" instance=ExtResource("8")]
+visible = false
+
+[node name="PerkPicker" parent="UI" instance=ExtResource("15")]
 visible = false
 
 [node name="PauseMenu" parent="UI" instance=ExtResource("9")]

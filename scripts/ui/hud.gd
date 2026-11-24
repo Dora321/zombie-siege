@@ -222,6 +222,11 @@ func _draw_buffs(p: Variant) -> void:
 		draw_texture(Art.item_tex[id], Vector2(3, y))
 		_bar(Rect2(15, y + 4, 30, 2), left / float(GameData.ITEMS[id]["power"]), Color("#f0d050"))
 		y += 11
+	if not game.perks.is_empty():
+		var text := "天赋 ×%d" % game.perks.size()
+		var width := Art.font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		draw_rect(Rect2(4, y, width + 8, 14), Color("#292535"))
+		Art.draw_text(self, text, Vector2(8, y), 12, Color("#d6c8f0"))
 
 
 func _draw_wave_info() -> void:
@@ -229,6 +234,9 @@ func _draw_wave_info() -> void:
 	var top_center := Vector2(_view_size.x * 0.5, _safe_rect.position.y)
 	var label := "无尽 第 %d 波" % game.wave if game.endless else "第 %d / %d 波" % [game.wave, GameData.MAX_WAVE]
 	var color := Color("#ffe060") if game.endless else Color("#f0ece0")
+	if game.boss_rush:
+		label = "连战 %d / %d" % [game.wave, GameData.boss_rush_wave_count()]
+		color = Color("#ff9860")
 	Art.draw_text(self, label, top_center + Vector2(0, 2), 12, color, 1)
 	# 危险等级和契约倍率，跟在波数后面
 	if game.score_mult > 1.0:
@@ -587,11 +595,12 @@ func _draw_placement() -> void:
 	draw_rect(Rect2(screen, Vector2(16, 16)), c)
 	draw_rect(Rect2(screen, Vector2(16, 16)), Color(c.r, c.g, c.b, 1.0), false, 1.0)
 	draw_texture(Art.turret_base_tex, screen + Vector2(0, 2), Color(1, 1, 1, 0.75))
-	var range_center := screen + Vector2(8, 8)
-	var r := 118.0 + 16.0 * (int(game.turret_level) - 1)
+	var range_center := screen + Vector2(8, 15)
+	var spec: Dictionary = GameData.TURRET_TYPES[game.placing_turret_kind]
+	var r := (float(spec["range_base"]) + float(spec["range_step"]) * (int(game.turret_level) - 1)) * float(game.events.turret_range)
 	draw_arc(range_center, r, 0, TAU, 48, Color(c.r, c.g, c.b, 0.4), 1.0)
 	var top_center := Vector2(_view_size.x * 0.5, _safe_rect.position.y)
 	var hint := "点击或拖动选格  左摇移动  确认或取消" if _touch else "左键放置炮塔  右键或 Esc 取消  WASD 可走动"
 	draw_rect(Rect2(0, 0, _view_size.x, top_center.y + 34.0), COL_DIM)
-	Art.draw_text(self, hint, top_center + Vector2(0, 3), 12, Color("#f0ece0"), 1)
-	Art.draw_text(self, "可放在任意空地，炮塔会挡路也会吸引僵尸", top_center + Vector2(0, 18), 12, Color("#c8c4b8"), 1)
+	Art.draw_text(self, "%s  射程 %d" % [spec["name"], roundi(r)], top_center + Vector2(0, 3), 12, Color(String(spec["color"])), 1)
+	Art.draw_text(self, hint, top_center + Vector2(0, 18), 12, Color("#c8c4b8"), 1)
