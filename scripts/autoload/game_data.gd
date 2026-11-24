@@ -453,7 +453,7 @@ const ACID_RAIN_BOSS_GAP := 1.5
 ## coins 开局金币，base_scale 基地受伤系数，group 一批僵尸从同一方向来的数量（越小越容易被包抄），
 ## group_grow 每隔几波多一只，look_gain 和 look_limit 控制镜头往准星方向看多远，
 ## count_scale 普通僵尸数量倍率（精英和 Boss 不变），spawn_pace 出怪间隔倍率（越小越密）。
-const MAP_ORDER: Array[String] = ["ruins", "parking", "alley"]
+const MAP_ORDER: Array[String] = ["ruins", "parking", "alley", "subway"]
 const MAPS := {
 	"ruins": {
 		"name": "废墟街区", "tag": "攻守均衡", "ground": "grass", "tint": "#ffffff", "mini": "#14210f",
@@ -472,6 +472,13 @@ const MAPS := {
 		"desc": ["楼房夹着两三格宽的巷子，僵尸排成长队来。", "一座炮塔卡住路口就很值，手雷和电弧也打得满。", "但小心被前后堵死，跑之前先看小地图。"],
 		"coins": 150, "base_scale": 0.3, "count_scale": 0.88, "spawn_pace": 1.05, "group": [4, 7], "group_grow": 2, "look_gain": 0.2, "look_limit": 160.0,
 		"preview": {"floor": "#6a645c", "road": "#6a645c", "solid": "#2a2833", "prop": "#4a7a58"},
+	},
+	"subway": {
+		"name": "地铁站台", "tag": "高压电网 · 南北双通道", "ground": "concrete", "tint": "#d8e2f0", "mini": "#1a202c",
+		"summary": "南北站台双通道，两道高压电网，炸药桶每波补充。",
+		"desc": ["南北站台各有一道高压电网，两只僵尸同时进入就会放电。", "利用列车挡住侧面进攻，站台上的炸药桶每波补充。"],
+		"coins": 135, "base_scale": 0.36, "count_scale": 1.04, "spawn_pace": 0.96, "group": [3, 5], "group_grow": 3, "look_gain": 0.25, "look_limit": 184.0,
+		"preview": {"floor": "#424c5a", "road": "#202832", "solid": "#293241", "prop": "#788da2", "safety": "#d7b449"},
 	},
 }
 
