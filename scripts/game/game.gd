@@ -879,7 +879,12 @@ func _update_camera(dt: float) -> void:
 	if player.alive and player_can_walk() and Harness.bot == null:
 		var look: Vector2
 		if Mobile.is_touch():
-			look = player.aim * 48.0 if Mobile.aiming else Vector2.ZERO
+			if Mobile.aiming or Mobile.firing:
+				look = player.aim * 44.0
+			elif Mobile.move_vec.length_squared() > 0.01:
+				look = Mobile.move_vec * 24.0
+			else:
+				look = Vector2.ZERO
 		else:
 			look = (get_global_mouse_position() - player.position).limit_length(float(_map_spec["look_limit"]))
 		target += look * float(_map_spec["look_gain"])

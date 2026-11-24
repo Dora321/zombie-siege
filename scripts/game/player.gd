@@ -8,6 +8,7 @@ const DASH_TIME := 0.15
 const BOX_R := 5.0
 const HAND_H := 7.0
 const AIM_ASSIST_RANGE := 220.0
+const AUTO_LOCK_RANGE := 260.0
 const AIM_ASSIST_ANGLE := deg_to_rad(24.0)
 ## 进化武器的名字和 HUD 标记用这个颜色。
 const EVO_COLOR := Color("#80f0ff")
@@ -75,6 +76,8 @@ var _latch_item := ""
 var _latch_item_next := false
 var _buff_tint := false
 var _aim_assist_offset := 0.0
+var _touch_fire_hold_t := 0.0
+var touch_lock_target: Node2D = null
 
 @onready var body: Sprite2D = $Body
 @onready var gun: Sprite2D = $Gun
@@ -289,18 +292,44 @@ func _physics_process(dt: float) -> void:
 		var touch := Mobile.is_touch()
 		var hand := position + Vector2(0, -HAND_H)
 		if touch:
+			_touch_fire_hold_t = maxf(_touch_fire_hold_t - dt, 0.0)
 			if Mobile.move_vec.length_squared() > 0.0001:
 				move_input = Mobile.move_vec
 			if Mobile.aiming and Mobile.aim_vec.length_squared() > 0.01:
+				# 右摇杆拖动：360° 手动精准瞄准（开启自动瞄准时做轻微扇形磁吸）
 				aim = Mobile.aim_vec.normalized()
 				if Save.auto_aim_on and Mobile.firing:
 					aim = _assisted_touch_aim(aim, hand, dt)
 				else:
 					_aim_assist_offset = 0.0
-			else:
+					touch_lock_target = null
+				aim_point = hand + aim * 120.0
+				_touch_fire_hold_t = 0.32
+			elif Mobile.firing:
+				# 点按/按住射击不拖动：自动锁定射程内最近可见敌人；无敌人时面向移动方向
 				_aim_assist_offset = 0.0
-			aim_point = hand + aim * 120.0
+				_touch_fire_hold_t = 0.32
+				var locked: Variant = _find_auto_lock_target(hand) if Save.auto_aim_on else null
+				touch_lock_target = locked
+				if locked != null:
+					var lock_pos: Vector2 = locked.center()
+					var to: Vector2 = lock_pos - hand
+					if to.length_squared() > 4.0:
+						aim = to.normalized()
+					aim_point = lock_pos
+				else:
+					if move_input.length_squared() > 0.01:
+						_turn_aim_toward(move_input.normalized(), dt * 18.0)
+					aim_point = hand + aim * 120.0
+			else:
+				# 仅左手移动：自然面向移动方向，并预览下一个自动锁定目标
+				_aim_assist_offset = 0.0
+				touch_lock_target = _find_auto_lock_target(hand) if Save.auto_aim_on else null
+				if move_input.length_squared() > 0.01 and _touch_fire_hold_t <= 0.0:
+					_turn_aim_toward(move_input.normalized(), dt * 18.0)
+				aim_point = hand + aim * 120.0
 		else:
+			touch_lock_target = null
 			var mouse := get_global_mouse_position()
 			aim_point = mouse
 			if mouse.distance_squared_to(hand) > 4.0:
@@ -363,13 +392,45 @@ func _physics_process(dt: float) -> void:
 	_animate(dt, move_input)
 
 
+func _turn_aim_toward(target_dir: Vector2, weight: float) -> void:
+	var diff := wrapf(target_dir.angle() - aim.angle(), -PI, PI)
+	aim = Vector2.from_angle(aim.angle() + diff * clampf(weight, 0.0, 1.0))
+
+
+func _find_auto_lock_target(hand: Vector2) -> Node2D:
+	var view := get_viewport_rect().grow(12.0)
+	var canvas := get_canvas_transform()
+	var best_clear: Node2D = null
+	var best_clear_score := INF
+	var best_any: Node2D = null
+	var best_any_score := INF
+	var current_valid: bool = is_instance_valid(touch_lock_target) and not bool(touch_lock_target.get("dead")) and not touch_lock_target.cloaked() and not bool(touch_lock_target.get("burrowed"))
+	for z: Variant in game.zombies_near(hand, AUTO_LOCK_RANGE):
+		if z.dead or z.cloaked() or z.burrowed or not z.is_visible_in_tree():
+			continue
+		var target: Vector2 = z.center()
+		var dist := hand.distance_to(target)
+		if dist > AUTO_LOCK_RANGE or not view.has_point(canvas * target):
+			continue
+		var score := dist - (22.0 if current_valid and z == touch_lock_target else 0.0)
+		if map.line_clear(hand, target, map.BLOCK_BULLET):
+			if score < best_clear_score:
+				best_clear_score = score
+				best_clear = z
+		elif score < best_any_score:
+			best_any_score = score
+			best_any = z
+	return best_clear if best_clear != null else best_any
+
+
 func _assisted_touch_aim(direction: Vector2, hand: Vector2, dt: float) -> Vector2:
 	var best_angle := AIM_ASSIST_ANGLE
 	var correction := 0.0
+	var assisted: Node2D = null
 	var view := get_viewport_rect()
 	var canvas := get_canvas_transform()
 	for z: Variant in game.zombies_near(hand, AIM_ASSIST_RANGE):
-		if z.dead or z.cloaked() or not z.is_visible_in_tree():
+		if z.dead or z.cloaked() or z.burrowed or not z.is_visible_in_tree():
 			continue
 		var target: Vector2 = z.center()
 		var delta := target - hand
@@ -379,6 +440,8 @@ func _assisted_touch_aim(direction: Vector2, hand: Vector2, dt: float) -> Vector
 		if absf(angle) <= best_angle and map.line_clear(hand, target, map.BLOCK_BULLET):
 			best_angle = absf(angle)
 			correction = angle * 0.6
+			assisted = z
+	touch_lock_target = assisted
 	_aim_assist_offset = lerpf(_aim_assist_offset, correction, 1.0 - exp(-18.0 * dt))
 	return direction.rotated(_aim_assist_offset)
 

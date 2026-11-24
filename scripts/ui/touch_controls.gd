@@ -9,9 +9,7 @@ const STICK_RADIUS := 26.0
 const DASH_RADIUS := 14.0
 const RELOAD_RADIUS := 12.0
 const ITEM_RADIUS := 13.0
-const AIM_DEADZONE := 0.15
-const FIRE_THRESHOLD := 0.38
-const HOLD_TO_FIRE_MS := 50
+const AIM_DEADZONE := 0.14
 
 const INK := Color(0.055, 0.06, 0.085, 0.82)
 const EDGE := Color(0.69, 0.76, 0.8, 0.66)
@@ -35,7 +33,6 @@ var _move_origin := Vector2.ZERO
 var _move_delta := Vector2.ZERO
 var _aim_origin := Vector2.ZERO
 var _aim_delta := Vector2.ZERO
-var _aim_center_since := -1
 
 var _safe_rect := Rect2()
 var _move_home := Vector2.ZERO
@@ -65,7 +62,6 @@ func reset_controls() -> void:
 	_buttons.clear()
 	_move_delta = Vector2.ZERO
 	_aim_delta = Vector2.ZERO
-	_aim_center_since = -1
 
 
 func _on_visibility_changed() -> void:
@@ -165,7 +161,7 @@ func _target_at(pos: Vector2) -> Target:
 		return Target.RELOAD
 	if pos.distance_to(_item_center) <= ITEM_RADIUS + 3.0:
 		return Target.ITEM
-	if _aim_finger == -1 and pos.distance_to(_aim_home) <= STICK_RADIUS + 8.0:
+	if _aim_finger == -1 and (pos.distance_to(_aim_home) <= STICK_RADIUS + 14.0 or (pos.x >= size.x * 0.5 and pos.y >= _safe_rect.position.y + 92.0)):
 		return Target.AIM
 	if _move_finger == -1 and pos.x < size.x * 0.5 and pos.y >= _safe_rect.position.y + 50.0:
 		return Target.MOVE
@@ -193,8 +189,11 @@ func _pointer_button(index: int, pos: Vector2, pressed: bool, canceled: bool) ->
 			Mobile.move_vec = Vector2.ZERO
 		Target.AIM:
 			_aim_finger = index
-			_aim_origin = _aim_home + (pos - _aim_home).limit_length(10.0)
-			_aim_delta = (pos - _aim_origin).limit_length(STICK_RADIUS)
+			var margin := 16.0
+			var min_p := _safe_rect.position + Vector2(margin, margin)
+			var max_p := _safe_rect.end - Vector2(margin, margin)
+			_aim_origin = Vector2(clampf(pos.x, min_p.x, max_p.x), clampf(pos.y, min_p.y, max_p.y))
+			_aim_delta = Vector2.ZERO
 			_update_aim()
 		Target.PLACE:
 			_place_finger = index
@@ -239,7 +238,6 @@ func _release_pointer(index: int, pos: Vector2, canceled: bool) -> bool:
 	elif index == _aim_finger:
 		_aim_finger = -1
 		_aim_delta = Vector2.ZERO
-		_aim_center_since = -1
 		Mobile.aim_vec = Vector2.ZERO
 		Mobile.aiming = false
 		Mobile.firing = false
@@ -259,12 +257,8 @@ func _update_aim() -> void:
 	var pull := _aim_delta.length() / STICK_RADIUS
 	Mobile.aiming = pull > AIM_DEADZONE
 	Mobile.aim_vec = _aim_delta.normalized() if Mobile.aiming else Vector2.ZERO
-	var now := Time.get_ticks_msec()
-	if Mobile.aiming:
-		_aim_center_since = -1
-	elif _aim_center_since < 0:
-		_aim_center_since = now
-	Mobile.firing = pull > FIRE_THRESHOLD or (_aim_center_since >= 0 and now - _aim_center_since >= HOLD_TO_FIRE_MS)
+	# 点按/按住立即自动索敌开火，拖动立即 360° 手动转向并连发。
+	Mobile.firing = _aim_finger != -1
 
 
 func _set_place_target(pos: Vector2) -> void:
@@ -284,7 +278,9 @@ func _draw() -> void:
 		_draw_placement_button(_cancel_rect, "取消", EDGE, Target.CANCEL)
 		return
 	var aiming := _aim_finger != -1
-	_draw_stick(_aim_origin if aiming else _aim_home, _aim_delta, FIRE_COLOR, aiming, Mobile.firing)
+	var aim_center := _aim_origin if aiming else _aim_home
+	_draw_stick(aim_center, _aim_delta, FIRE_COLOR, aiming, Mobile.firing)
+	_draw_fire_reticle(aim_center + _aim_delta * 0.73, FIRE_COLOR if aiming else EDGE)
 	_draw_actions()
 
 
@@ -308,6 +304,13 @@ func _draw_stick(center: Vector2, delta: Vector2, accent: Color, pressed: bool, 
 		var tick_size := Vector2(2, 4) if axis.x == 0.0 else Vector2(4, 2)
 		draw_rect(Rect2(at - tick_size * 0.5, tick_size), tick)
 	_plate(center + delta * 0.73, 8.0, Color(accent, 0.48 if pressed else 0.10), tick)
+
+
+func _draw_fire_reticle(center: Vector2, color: Color) -> void:
+	center = center.round()
+	for s: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		draw_rect(Rect2((center + s * 3.0).round() - Vector2(0.5, 0.5), Vector2(2, 2)), color)
+	draw_rect(Rect2(center - Vector2(0.5, 0.5), Vector2(1, 1)), color)
 
 
 func _draw_actions() -> void:

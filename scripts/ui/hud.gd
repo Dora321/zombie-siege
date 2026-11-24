@@ -497,16 +497,34 @@ func _draw_vignette() -> void:
 func _draw_crosshair() -> void:
 	var p: Variant = game.player
 	if _touch:
-		if Mobile.aiming:
+		var camera: Camera2D = game.camera
+		var canvas := camera.get_canvas_transform()
+		var locked: Variant = p.touch_lock_target
+		if is_instance_valid(locked) and not bool(locked.dead) and not locked.cloaked() and not bool(locked.burrowed):
+			var lock_pos: Vector2 = locked.center()
+			var center: Vector2 = (canvas * lock_pos).round()
+			var r := float(locked.hit_r) + 4.0
+			var active_lock := Mobile.firing
+			var lock_col := Color("#ff6050") if (active_lock and game.hit_marker_active()) else (Color("#ffc050") if active_lock else Color(1.0, 0.82, 0.45, 0.45))
+			var arm := 3.0
+			for sx: float in [-1.0, 1.0]:
+				for sy: float in [-1.0, 1.0]:
+					var corner: Vector2 = center + Vector2(sx * r, sy * r)
+					draw_line(corner, corner - Vector2(sx * arm, 0.0), lock_col, 1.0)
+					draw_line(corner, corner - Vector2(0.0, sy * arm), lock_col, 1.0)
+		if Mobile.aiming or Mobile.firing:
 			var aim: Vector2 = p.aim.normalized()
-			var camera: Camera2D = game.camera
-			var world: Vector2 = p.global_position + aim * 30.0
-			var at := (camera.get_canvas_transform() * world).round()
-			var side := aim.orthogonal() * 2.0
-			var col := Color("#ff6050") if game.hit_marker_active() else Color(0.94, 0.92, 0.88, 0.75)
-			draw_rect(Rect2(at, Vector2(2, 2)), col)
-			draw_rect(Rect2((at - aim * 3.0 + side).round(), Vector2.ONE), col)
-			draw_rect(Rect2((at - aim * 3.0 - side).round(), Vector2.ONE), col)
+			var col := Color("#ff6050") if game.hit_marker_active() else Color(0.96, 0.92, 0.84, 0.85 if Mobile.aiming else 0.5)
+			for dist: float in [20.0, 32.0]:
+				var world: Vector2 = p.global_position + Vector2(0, -p.HAND_H) + aim * dist
+				var at := (canvas * world).round()
+				if dist > 25.0:
+					var side := aim.orthogonal() * 2.5
+					draw_rect(Rect2(at, Vector2(2, 2)), col)
+					draw_rect(Rect2((at - aim * 3.0 + side).round(), Vector2.ONE), col)
+					draw_rect(Rect2((at - aim * 3.0 - side).round(), Vector2.ONE), col)
+				else:
+					draw_rect(Rect2(at, Vector2(1, 1)), Color(col.r, col.g, col.b, col.a * 0.7))
 		return
 	var m := get_viewport().get_mouse_position().round()
 	var gap: float = 3.0 + float(p.fired_kick) * 3.0
