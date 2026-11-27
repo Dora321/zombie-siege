@@ -552,7 +552,8 @@ func quenched() -> bool:
 func vulnerability() -> float:
 	if _frozen_t > 0.0:
 		return GameData.FREEZE_VULN
-	if _chill_t > 0.0:
+	# 熔岩领主的淬火易伤由 Boss 机制结算。
+	if _chill_t > 0.0 and kind != "magma":
 		return GameData.CHILL_VULN
 	return 1.0
 
@@ -564,7 +565,9 @@ func apply_chill(amount: float) -> void:
 	if dead:
 		return
 	# 先燃后冻：冰把火浇灭的这一下淬火
-	var was_burning := _burn_t > 0.0
+	var was_burning := burning()
+	if kind == "frostlord" and not was_burning:
+		return
 	_burn_t = 0.0
 	_blue_burn_t = 0.0
 	_chill_t = GameData.CHILL_TIME + _status_bonus()
@@ -578,13 +581,19 @@ func apply_chill(amount: float) -> void:
 			_brain.on_stun(self)
 		game.fx.frost(center())
 		Sfx.play("cryo", 0.0, 0.2)
-	if was_burning:
+	if was_burning or kind == "magma":
 		_quench()
 
 
 ## 淬火：几秒内覆甲和盾失效。只有身上有甲或举着盾才飘字，免得普通僵尸身上冒出看不懂的字。
 func _quench() -> void:
-	_quench_t = GameData.QUENCH_TIME
+	var fresh := not quenched()
+	_quench_t = maxf(_quench_t, GameData.QUENCH_TIME)
+	if kind == "magma":
+		if fresh:
+			cue("淬火", CUE_QUENCH, CUE_REPEAT, true)
+			game.fx.steam(center())
+		return
 	if armored():
 		cue("淬火", CUE_QUENCH, CUE_REPEAT, true)
 		for i in 4:
@@ -625,12 +634,18 @@ func ignite(seconds: float, blue := false) -> void:
 	if dead:
 		return
 	var duration := seconds + _status_bonus()
+	var melts_aura := kind == "frostlord" and not burning() and duration > 0.0
 	_burn_t = maxf(_burn_t, duration)
 	if blue:
 		_blue_burn_t = maxf(_blue_burn_t, duration)
 	_chill = 0.0
 	_chill_t = 0.0
 	_frozen_t = 0.0
+	if melts_aura:
+		game.hazards.thaw_turrets()
+		if game.has_method("thaw_all_turrets"):
+			game.thaw_all_turrets()
+		cue("融化！", Color("#ff9840"), CUE_REPEAT, true)
 
 
 ## 战利品「坟主骨灰」：冰冻和燃烧多挂一会儿。
@@ -720,7 +735,7 @@ func _tick_regen(dt: float) -> void:
 		_regen_shown = 0.0
 
 
-## 子弹、爆炸都走这里。src 标明伤害来源（bullet/buckshot/beam/arc/rang/blast/nuke），
+## 子弹、爆炸都走这里。src 标明伤害来源（bullet/ice/buckshot/beam/arc/rang/blast/nuke），
 ## Boss 的覆甲、钻地要看它；蓝焰用 blue_flame，脚本直接扣血留空。
 func take_damage(amount: float, dir: Vector2, knock: float, show_number := true, src := "", element := "") -> void:
 	if dead:
@@ -741,6 +756,8 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true,
 		no_blast = true
 	elif _brain != null:
 		amount = _brain.absorb(self, amount, src)
+		if kind == "voltking" and src == "beam":
+			_brain.on_emp_hit(self, knock, "狙击")
 		_brain.on_hit(self)
 		if amount <= 0.0:
 			# 打在护盾或无敌阶段上：有火花没有血
@@ -758,9 +775,10 @@ func take_damage(amount: float, dir: Vector2, knock: float, show_number := true,
 	if show_number:
 		game.fx.number(hit_pos + Vector2(randf_range(-3, 3), -6), roundi(amount), Color("#ffe080") if amount < 30.0 else Color("#ffa040"))
 	# 打对了克制手段：冻住吃易伤（霰弹和狙击还会碎冰），或者 Boss/精英自己判定（覆甲吃满额、绕后、爆炸火电）
+	var weak_src := "bullet" if src == "ice" and not is_boss else src
 	if shatter and not overkill:
 		_shatter()
-	elif src != "" and not overkill and (frozen or (_brain != null and _brain.weak_hit(self, src, dir))):
+	elif src != "" and not overkill and (frozen or (_brain != null and _brain.weak_hit(self, weak_src, dir))):
 		cue("弱点！", CUE_WEAK)
 	if randf() < 0.3:
 		game.decals.stamp_pixel_group(position + dir * randf_range(4, 14), Color("#7c1414"), 4)

@@ -14,21 +14,37 @@ const FAN_REACH := 170.0
 const WAVE_REACH := 150.0
 const FAR := 260.0
 const MINION_CAP := 6
+const FROST_AURA_GAP := 3.5
+const FROST_AURA_R := 135.0
+const EMP_R := 140.0
+const EMP_BREAK := 180.0
+const OVERHEAT_HITS := 15
 ## 连冲被闪光或霰弹打断后的硬直。
 const BREAK_STUN := 0.8
 const MOVE_WARN := {
 	"charge": CHARGE_WARN, "charge2": CHARGE_WARN, "slam": 0.9, "rocks": 0.55, "storm": 0.7, "fog": 0.6,
 	"fogring": 0.7, "fan": 0.6, "wave": 0.9, "call": 0.8, "elites": 1.0, "shield": 0.7, "scream": 0.9,
 	"burrow": 0.5, "emerge_slam": 0.7, "reflect_aura": 1.0,
-	"fire_orb": 1.35, "ice_orb": 1.35, "car_toss": 1.2, "bungee": 1.0,
+	"fire_orb": 1.35, "ice_orb": 1.35, "car_toss": 1.2, "bungee": 1.0, "emp_pulse": 1.2, "frost_ring": 0.9,
 }
 const SIGNATURE_MOVES := {
 	"boss": ["car_toss"], "colossus": ["car_toss"], "plague": ["bungee"], "graveborn": ["ice_orb"],
 	"burrowlord": ["bungee"], "mirror": ["fire_orb"], "overlord": ["bungee", "car_toss"],
+	"frostlord": ["frost_ring"],
 }
 const SIGNATURE_LINES := {
 	"fire_orb": "巨型火球！冰可熄灭", "ice_orb": "巨型冰球！火可融化",
-	"car_toss": "接住这辆废车！", "bungee": "蹦极尸群，空降！",
+	"car_toss": "接住这辆废车！", "bungee": "蹦极尸群，空降！", "emp_pulse": "电磁脉冲！炮塔休想开火！",
+	"frost_ring": "炮塔们，集体冬眠！",
+}
+const ELEMENTAL_MOVE_LINES := {
+	"magma": {"fire_orb": "滚烫的火球来了！冰可熄灭"},
+	"frostlord": {"ice_orb": "尝尝我的冰球！火可融化"},
+	"ironmech": {"car_toss": "借过！废车送上门！"},
+}
+const ELEMENTAL_EXPOSE_LINES := {
+	"magma": "炉子熄了！", "frostlord": "谁把暖气打开了？",
+	"voltking": "这回真跳闸了！", "ironmech": "散热风扇烧了！",
 }
 const BANTER := {
 	"vanguard": ["让我先咬一口！", "再来一轮！"],
@@ -39,15 +55,19 @@ const BANTER := {
 	"burrowlord": ["小心你的脚下！", "地底还有动静！"],
 	"mirror": ["看看你身后！", "每道裂缝都是一面镜子！"],
 	"overlord": ["这座城归我了！", "听令，亡者！", "冰与火，听我号令！", "王冠是我的！"],
+	"magma": ["谁点的熔岩外卖？", "炉门开了，站远点！", "上菜！烫嘴的！"],
+	"frostlord": ["欢迎入住冷冻库！", "门关上，别漏冷气！", "今天全城放冰假！"],
+	"voltking": ["哪座炮塔欠着电费？", "跳闸？那是我在热身！", "来，让你见识一下满电！"],
+	"ironmech": ["铁幕上线！先试试你的火力！", "停车场征用了！", "散热风扇，转快点！"],
 }
 const EXPOSE_COLOR := Color("#ffe060")
 ## 覆甲阈值不管这些来源：爆炸、狙击、回旋镖、霰弹、蓝焰、核弹、脚本直接扣血。
 const FLOOR_EXEMPT: Array[String] = ["blast", "beam", "rang", "saw", "buckshot", "blue_flame", "nuke", ""]
 ## 钻在地下时，这些直射打不到它（子弹从土堆上飞过去）。
-const DIRECT: Array[String] = ["bullet", "buckshot", "beam", "rang", "saw", "arc"]
+const DIRECT: Array[String] = ["bullet", "ice", "buckshot", "beam", "rang", "saw", "arc"]
 ## 镜面的克制：这些不看朝向（saw 是锯刃回旋，镜子弹不回）；直射从背后打进来也算。
 const MIRROR_WEAK: Array[String] = ["arc", "blast", "tick", "blue_flame", "saw"]
-const MIRROR_BACK: Array[String] = ["bullet", "buckshot", "beam"]
+const MIRROR_BACK: Array[String] = ["bullet", "ice", "buckshot", "beam"]
 const BURROW_SPEED := 1.3
 const BURROW_REACH := 400.0
 ## 地下离玩家这么近就出土砸人。
@@ -85,9 +105,11 @@ var _last := ""
 var _chain := 0
 var _enter := ""
 var _guard := 1.0
-# 阶段配了 break 时，连冲的蓄力能被打断；_brace 是这次蓄力已经吃到的霰弹击退
+# _brace 记录连冲或电磁脉冲蓄力时吃到的原始击退。
 var _breakable := false
 var _brace := 0.0
+var _frost_aura_t := FROST_AURA_GAP
+var _rapid_hits := 0
 var _lane: Variant = null
 # 配了 once 的招式本阶段放过没有
 var _phase_used := {}
@@ -116,6 +138,8 @@ func setup(z: Variant) -> void:
 	redraw = true
 	spec = GameData.BOSSES[z.kind]
 	phases = spec["phases"]
+	if z.kind == "voltking":
+		shield_max = z.max_hp * float(spec["shield"])
 	_apply_phase(z)
 	_banter(z)
 
@@ -130,6 +154,16 @@ func status(z: Variant = null) -> String:
 		return "破防！易伤×1.8"
 	if underground():
 		return "在地下"
+	if z != null:
+		match z.kind:
+			"magma":
+				return "淬火脆化" if z.quenched() else "熔岩护壳"
+			"frostlord":
+				return "冰壳融化" if z.burning() else "极寒光环"
+			"voltking":
+				return "蓄电过载"
+			"ironmech":
+				return "防爆力场 %d/%d" % [_rapid_hits, OVERHEAT_HITS]
 	if z != null and z.quenched() and has_armor(z):
 		return "淬火破甲"
 	if aura_t > 0.0:
@@ -222,6 +256,8 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 		return _phase_damage(z, amount)
 	if expose_t > 0.0:
 		amount *= 1.8
+	else:
+		amount *= _elemental_multiplier(z, src)
 	# 覆甲：小伤害只结算一成。先看原始伤害，护盾照常全额吃
 	var light := expose_t <= 0.0 and _armored(z) and not FLOOR_EXEMPT.has(src) and amount < float(spec["hit_floor"])
 	if shield > 0.0:
@@ -242,6 +278,65 @@ func absorb(z: Variant, amount: float, src := "") -> float:
 		_note("floor", "%s 的装甲挡下小伤害（累计 %d 次，来源 %s）" % [spec["title"], int(stats["floor"]), src])
 		_counter_tip(z, int(stats["floor"]) >= 6, "厚甲弹开！", "换霰弹、狙击、爆炸或蓝焰熔炉破甲", Color("#ffd080"))
 	return _phase_damage(z, amount * _guard)
+
+
+## 元素和力场抗性先于护盾结算，护盾与本体按相同倍率承伤。
+func _elemental_multiplier(z: Variant, src: String) -> float:
+	match z.kind:
+		"magma":
+			if src in ["tick", "blue_flame", "burn"]:
+				var color := Color("#ff8844")
+				_count("fire_resist")
+				z.cue("抗性！", color)
+				_counter_tip(z, int(stats["fire_resist"]) >= 4, "火焰抗性！", "换冰冻枪、冰霜塔或冷媒核心淬火破壳", color)
+				return 0.25
+			if src == "ice":
+				z.cue("克制！", Color("#70f0ff"))
+				return 2.0
+			if z.quenched():
+				return 1.6
+		"frostlord":
+			if src == "ice":
+				var color := Color("#90e8ff")
+				z.cue("抗性！", color)
+				_counter_tip(z, true, "寒冰抗性！", "换喷火器、龙息霰弹、榴弹或燃烧枪口融化", color)
+				return 0.25
+			if src in ["tick", "blue_flame", "blast"]:
+				z.cue("克制！", Color("#ff9840"))
+				return 2.0
+		"voltking":
+			if src == "arc":
+				var color := Color("#c896ff")
+				shield = minf(shield_max, shield + shield_max * 0.04)
+				z.cue("吸电！", color)
+				_counter_tip(z, true, "吸收电弧！", "换狙击、霰弹或回旋镖，闪光打断脉冲可超频炮塔", color)
+				return 0.20
+			if src in ["beam", "buckshot", "rang", "saw"]:
+				z.cue("克制！", Color("#ffe060"))
+				return 1.6
+		"ironmech":
+			if src == "blast":
+				var color := Color("#a0b4c8")
+				z.cue("防爆！", color)
+				_counter_tip(z, true, "防爆力场！", "换电弧枪过载，或冲锋枪/机枪塔高频连射 15 发破防", color)
+				return 0.25
+			if src in ["beam", "rang"]:
+				z.cue("力场偏折", Color("#a0b4c8"))
+				return 0.50
+			if src == "arc":
+				z.cue("过载！", Color("#80e8ff"))
+				_add_rapid_hits(z, 3)
+				return 2.0
+			if src in ["bullet", "ice", "tick", "blue_flame", "buckshot"]:
+				_add_rapid_hits(z, 1)
+	return 1.0
+
+
+func _add_rapid_hits(z: Variant, hits: int) -> void:
+	_rapid_hits += hits
+	if _rapid_hits >= OVERHEAT_HITS:
+		_rapid_hits = 0
+		trigger_expose(z, 3.0, "力场过热崩溃！")
 
 
 func _phase_damage(z: Variant, amount: float) -> float:
@@ -267,6 +362,8 @@ func weak_hit(z: Variant, src: String, dir: Vector2) -> bool:
 func _begin_change(z: Variant) -> void:
 	phase += 1
 	changing_t = CHANGE_T
+	if _act in ["emp_pulse", "frost_ring"]:
+		z.game.hazards.cancel_cast(z)
 	_act = ""
 	_chain = 0
 	_breakable = false
@@ -306,7 +403,7 @@ func trigger_expose(z: Node2D, seconds := 3.0, reason := "破防！") -> void:
 	if fresh:
 		_count("exposed")
 		if not Harness.automated():
-			_say(z, reason + "全力输出！", EXPOSE_COLOR, true)
+			_say(z, reason + String(ELEMENTAL_EXPOSE_LINES.get(z.kind, "全力输出！")), EXPOSE_COLOR, true)
 		_note("exposed", "%s %s" % [spec["title"], reason])
 
 
@@ -331,7 +428,9 @@ func on_stun(z: Variant, charging := false) -> void:
 		_force_out(z, "闪光")
 		return
 	# 被晕打断蓄力，闪光弹是正经的反制手段
-	if _breakable and _act != "":
+	if _act == "emp_pulse":
+		_interrupt(z, "闪光")
+	elif _breakable and (_act != "" or (charging and z.kind == "voltking")):
 		_interrupt(z, "闪光")
 	elif charging or _act == "charge" or _act == "charge2" or SIGNATURE_LINES.has(_act):
 		trigger_expose(z, 2.0, "打断破防！")
@@ -343,6 +442,9 @@ func on_stun(z: Variant, charging := false) -> void:
 
 ## 霰弹的击退 Boss 几乎不吃，但连冲蓄力时按原始击退累计，攒够就打断。
 func on_buckshot(z: Variant, knock: float) -> void:
+	if _act == "emp_pulse":
+		on_emp_hit(z, knock, "霰弹")
+		return
 	if not _breakable or _act == "":
 		return
 	_brace += knock
@@ -351,11 +453,29 @@ func on_buckshot(z: Variant, knock: float) -> void:
 		z.stun(BREAK_STUN)
 
 
+func on_emp_hit(z: Variant, knock: float, by: String) -> void:
+	if _act != "emp_pulse":
+		return
+	_brace += knock
+	if _brace >= EMP_BREAK:
+		_interrupt(z, by)
+
+
 func _interrupt(z: Variant, by: String) -> void:
-	trigger_expose(z, 2.0, "打断破防！")
+	var emp := _act == "emp_pulse"
+	if emp:
+		# 危险区可能已在这一帧先于 Boss 的动作计时结算。
+		if not z.game.hazards.emp_pending(z):
+			return
+		z.game.hazards.clear_owner(z)
+		trigger_expose(z, 3.0, "脉冲短路破防！")
+	else:
+		trigger_expose(z, 2.0, "打断破防！")
+	if z.kind == "voltking" and z.game.has_method("overclock_all_turrets"):
+		z.game.overclock_all_turrets(5.0)
 	z._stun_t = maxf(z._stun_t, BREAK_STUN)
 	Sfx.play("shield_break", 0.0)
-	Harness.note("%s 的连冲被%s打断（第 %d 阶段）" % [spec["title"], by, phase + 1])
+	Harness.note("%s 的%s被%s打断（第 %d 阶段）" % [spec["title"], "电磁脉冲" if emp else "连冲", by, phase + 1])
 
 
 ## 蓄力被取消时，地上的冲撞通道也一起撤掉。
@@ -388,6 +508,15 @@ func tick(z: Variant, dt: float) -> void:
 	var flash := expose_t > 0.0 and int(_clock * 12.0) % 2 == 0
 	z.body.self_modulate = Color(1.7, 0.95, 0.35) if flash else Color.WHITE
 	_tick_regen(z, dt)
+	if z.kind == "frostlord" and not z.burning() and expose_t <= 0.0 and changing_t <= 0.0:
+		_frost_aura_t -= dt
+		if _frost_aura_t <= 0.0:
+			_frost_aura_t += FROST_AURA_GAP
+			if _has_turret_near(z, FROST_AURA_R):
+				if z.game.has_method("freeze_turrets_near"):
+					z.game.freeze_turrets_near(z.position, FROST_AURA_R, 2.5)
+				z.game.fx.frost(z.center())
+				z.game.fx.ring(z.position, FROST_AURA_R, 0.35, Color(0.55, 0.9, 1.0, 0.38))
 	if underground():
 		_counter_tip(z, _clock - _burrow_start > 2.2 and not stats.has("forced_out"),
 			"钻入地下！", "用爆炸、火焰或闪光弹逼它出土", Color("#ffba78"))
@@ -576,6 +705,13 @@ func _minions(z: Variant) -> int:
 	return n
 
 
+func _has_turret_near(z: Variant, radius: float) -> bool:
+	for turret: Variant in z.game.turrets:
+		if turret.alive and z.position.distance_squared_to(turret.position) <= radius * radius:
+			return true
+	return false
+
+
 ## 当前位置能放的招里挑一个，不连续重复。
 func _pick(z: Variant, player_ok: bool) -> String:
 	var options: Array[String] = []
@@ -638,6 +774,10 @@ func _can_use(z: Variant, move: String, d: float) -> bool:
 			return d <= ROCK_REACH or z.position.distance_to(z.game.base.position) <= ROCK_REACH
 		"bungee":
 			return _minions(z) <= MINION_CAP - 2 and z.game.zombies.size() < z.game.MAX_ALIVE
+		"emp_pulse":
+			return d <= EMP_R or _has_turret_near(z, EMP_R)
+		"frost_ring":
+			return d < WAVE_REACH or _has_turret_near(z, WAVE_REACH)
 	return false
 
 
@@ -655,10 +795,17 @@ func _begin_move(z: Variant, move: String, follow := false) -> void:
 	z.flash_warn(warn)
 	z._pose = 2
 	var hazards: Variant = z.game.hazards
-	if SIGNATURE_LINES.has(move):
+	var move_lines: Dictionary = ELEMENTAL_MOVE_LINES.get(z.kind, {})
+	var line := String(move_lines.get(move, SIGNATURE_LINES.get(move, "")))
+	if line != "":
 		if not Harness.automated():
-			_say(z, String(SIGNATURE_LINES[move]), Color("#a8f4ff") if move == "ice_orb" else Color("#ffe080"))
-		_note(move, "%s：%s" % [spec["title"], SIGNATURE_LINES[move]])
+			var color := Color("#ffe080")
+			if z.kind == "frostlord" or move == "ice_orb":
+				color = Color("#a8f4ff")
+			elif move == "emp_pulse":
+				color = Color("#c896ff")
+			_say(z, line, color, move == "emp_pulse")
+		_note(move, "%s：%s" % [spec["title"], line])
 	match move:
 		"fire_orb", "ice_orb":
 			_orb_dir = z.position.direction_to(_orb_target(z, move))
@@ -676,9 +823,15 @@ func _begin_move(z: Variant, move: String, follow := false) -> void:
 			hazards.slam(z.position, SLAM_R * float(spec.get("slam_scale", 1.0)), z._damage * 1.2, warn, z)
 			Sfx.play("charge_warn", -2.0)
 		"wave":
-			# 掘地领主的预警全用高对比的黄圈，断电时也看得清
+			# 掘地领主用高对比黄圈，断电时也看得清。
 			hazards.warn_ring(z.position, 34.0, warn, z, "dig" if spec.has("burrow") else "")
 			Sfx.play("charge_warn", 0.0)
+		"frost_ring":
+			hazards.frost_ring(z.position, WAVE_REACH, warn, z._damage * 0.7, z)
+			Sfx.play("cryo", -3.0)
+		"emp_pulse":
+			hazards.emp_pulse(z.position, EMP_R, warn, z)
+			Sfx.play("charge_warn", -2.0)
 		"shield":
 			z.game.fx.ring(z.center(), 36.0, warn, Color("#a0ff70"))
 			Sfx.play("summon", -2.0)
@@ -843,7 +996,7 @@ func draw(z: Variant) -> void:
 		var at: Vector2 = mid + _orb_dir * (z.hit_r + 8.0)
 		var progress := 1.0 - _act_t / float(MOVE_WARN[_act])
 		z.game.hazards.draw_element_orb(z, at.round(), lerpf(5.0, 13.0, progress), _act, _clock * 8.0)
-	if z.quenched() and has_armor(z):
+	if z.quenched() and (has_armor(z) or z.kind == "magma"):
 		# 淬火：甲缝里往外冒白汽
 		var k := int(Time.get_ticks_msec() / 90) % 8
 		for j in 3:
