@@ -117,6 +117,26 @@ const CHARS := {
 		"skin": "#8a8aa0", "hair": "#20182c", "shirt": "#3a2a4c", "pants": "#1c1824",
 		"shoe": "#100e14", "eye": "#ff3020", "arm_w": 5, "arm_len": 7, "pads": true,
 	},
+	"magma": {
+		"w": 42, "h": 40, "hw": 10, "hh": 8, "tw": 24, "th": 15, "lh": 8, "zombie": true, "style": "magma",
+		"skin": "#3a2422", "hair": "#26191c", "shirt": "#3a2422", "pants": "#34222a",
+		"shoe": "#1c151b", "eye": "#ffe050", "arm_w": 4, "arm_len": 6, "pads": true,
+	},
+	"frostlord": {
+		"w": 40, "h": 40, "hw": 10, "hh": 8, "tw": 22, "th": 15, "lh": 8, "zombie": true, "style": "frostlord",
+		"skin": "#9ad8f0", "hair": "#427597", "shirt": "#345c80", "pants": "#304b67",
+		"shoe": "#22344b", "eye": "#e8ffff", "arm_w": 4, "arm_len": 6, "pads": true,
+	},
+	"voltking": {
+		"w": 40, "h": 38, "hw": 10, "hh": 7, "tw": 20, "th": 14, "lh": 7, "zombie": true, "style": "voltking",
+		"skin": "#4a3c78", "hair": "#352b57", "shirt": "#282240", "pants": "#332b50",
+		"shoe": "#211b35", "eye": "#90f8ff", "arm_w": 3, "arm_len": 6, "lean": 1,
+	},
+	"ironmech": {
+		"w": 44, "h": 42, "hw": 12, "hh": 8, "tw": 26, "th": 16, "lh": 8, "zombie": true, "style": "ironmech",
+		"skin": "#586478", "hair": "#394150", "shirt": "#303846", "pants": "#394653",
+		"shoe": "#212832", "eye": "#ff9030", "arm_w": 5, "arm_len": 6, "pads": true,
+	},
 }
 
 ## 3x5 迷你数字字体，用于伤害飘字和 HUD 数值。
@@ -163,12 +183,17 @@ const TROPHY_PLATING := [".sssssss.", "swsssswss", "sssssssss", "hhhhhhhhh", "ss
 const TROPHY_ASH := ["..kkkkk..", "...ggg...", "..ggggg..", ".gghhhgg.", ".gnnnnng.", ".ggggggg.", "..ggggg.."]
 const TROPHY_SOIL := ["....y....", "...yyy...", "..yywyy..", ".mmyyymm.", "mmmmmmmmm", "mdmmdmmdm", ".ddddddd."]
 const TROPHY_SHARD := ["......w..", ".....wb..", "....wbb..", "...wbbs..", "..wbbs...", ".wbbs....", ".bss....."]
+const TROPHY_MAGMA := ["..kyrk...", ".kyakrk..", "kayakark.", "kakyayakk", ".karyarak", "..kakark.", "...kkk..."]
+const TROPHY_FROST := [".wc...cw.", "wccw.cwcb", "wcccwccbb", ".wccwcbc.", "..wcwcb..", "...wcb...", "....b...."]
+const TROPHY_VOLT := ["..vvkvv..", ".myyyymm.", "..vccvk..", ".myyyymm.", "..vccvk..", ".myyyymm.", "..svvvs.."]
+const TROPHY_MECH := ["..s.s.s..", ".ksssssk.", "skvgvvvks", ".kvyavvk.", "skvayyvks", ".kkkkkkk.", "..s.s.s.."]
 const NUKE := ["kkkkkkkkk", "kyyyyyyyk", "kykkkkyyk", "kyykkyyyk", "kyyykyyyk", "kyyyyyyyk", "kkkkkkkkk"]
 const DECOY_BODY := ["...sss...", "...sss...", "m..www..m", "mmywwwymm", "...www...", "...www...", "...www...", "...d.d...", "...d.d...", "..dd.dd.."]
 const MISC_PAL := {
 	"w": "#f0ece0", "r": "#d83838", "g": "#a0a0a8", "y": "#f0d050", "o": "#6c7a3c",
 	"d": "#48522c", "l": "#ffa090", "b": "#5a90d0", "k": "#201c28", "s": "#a8b4c8", "h": "#8c8c94",
 	"n": "#70d040", "G": "#3c7a20", "m": "#e0a050",
+	"a": "#ff781f", "c": "#9aeaff", "v": "#68559a",
 }
 
 var font: Font
@@ -250,7 +275,7 @@ func char_image(kind: String, dir: int, index: int) -> Image:
 
 ## 把图集里的图片合成一张预览图，供开发时肉眼检查。
 func debug_sheet() -> Image:
-	var sheet := Image.create_empty(640, 720, false, Image.FORMAT_RGBA8)
+	var sheet := Image.create_empty(640, 880, false, Image.FORMAT_RGBA8)
 	sheet.fill(Color(0.3, 0.42, 0.26))
 	var y := 2
 	for kind in CHARS.keys():
@@ -687,6 +712,10 @@ func _build_items(_rng: RandomNumberGenerator) -> void:
 		"ash": _tex(_ascii(TROPHY_ASH, MISC_PAL)),
 		"soil": _tex(_ascii(TROPHY_SOIL, MISC_PAL)),
 		"shard": _tex(_ascii(TROPHY_SHARD, MISC_PAL)),
+		"magma_core": _tex(_ascii(TROPHY_MAGMA, MISC_PAL)),
+		"frost_heart": _tex(_ascii(TROPHY_FROST, MISC_PAL)),
+		"volt_coil": _tex(_ascii(TROPHY_VOLT, MISC_PAL)),
+		"mech_chip": _tex(_ascii(TROPHY_MECH, MISC_PAL)),
 	}
 	shadow_small = _tex(_shadow(11, 4))
 	shadow_medium = _tex(_shadow(19, 6))

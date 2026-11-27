@@ -9,10 +9,13 @@ const PAGES: Array = [
 	{"title": "Boss（二）", "kinds": ["colossus", "plague"]},
 	{"title": "Boss（三）", "kinds": ["graveborn", "burrowlord"]},
 	{"title": "Boss（四）", "kinds": ["mirror", "overlord"]},
+	{"title": "Boss（五）", "kinds": ["magma", "frostlord"]},
+	{"title": "Boss（六）", "kinds": ["voltking", "ironmech"]},
 ]
 const ROW_H := 50
 const TOP := 26
 const TEXT_X := 66
+const RESIST_COLOR := Color("#90b8e8")
 const WEAK_COLOR := Color("#ffa040")
 
 @onready var prev_button: Button = %BestiaryPrev
@@ -92,7 +95,9 @@ func _draw_row(kind: String, y: int, row: int) -> void:
 		var phases: Array = boss["phases"]
 		for i in phases.size():
 			lines += ("  " if i > 0 else "") + "%d.%s" % [i + 1, phases[i]["name"]]
-		Art.draw_text(self, "第 %d 波 · %d 阶段：%s" % [_boss_wave(kind), phases.size(), lines], Vector2(TEXT_X, y + 13), 12, Color("#e8e4d8"))
+		var wave := _boss_wave(kind)
+		var location := "连战 / 无尽" if wave == 0 else "第 %d 波" % wave
+		Art.draw_text(self, "%s · %d 阶段：%s" % [location, phases.size(), lines], Vector2(TEXT_X, y + 13), 12, Color("#e8e4d8"))
 		Art.draw_text(self, String(boss["warn"]), Vector2(TEXT_X, y + 26), 12, Color("#a8d8a0"))
 		if boss.has("trophy"):
 			Art.draw_text(self, "战利品：%s（%s）" % [GameData.TROPHIES[boss["trophy"]]["name"], GameData.TROPHIES[boss["trophy"]]["desc"]], Vector2(TEXT_X, y + 39), 12, Color("#ffe080"))
@@ -111,6 +116,11 @@ func _draw_row(kind: String, y: int, row: int) -> void:
 
 
 func _draw_weak(kind: String, at: Vector2) -> void:
+	var resist := GameData.boss_resist(kind)
+	if resist != "":
+		var label := "抗：%s   " % resist
+		Art.draw_text(self, label, at, 12, RESIST_COLOR)
+		at.x += Art.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 	var weak := GameData.weakness(kind)
 	if weak != "":
 		Art.draw_text(self, "怕：" + weak, at, 12, WEAK_COLOR)

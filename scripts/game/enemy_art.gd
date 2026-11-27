@@ -64,6 +64,14 @@ static func decorate(a: Node, style: String, img: Image, s: Dictionary, dir: int
 			_burrowlord(a, img, s, b, dir, f)
 		"mirror":
 			_mirror(a, img, s, b, dir, f)
+		"magma":
+			_magma(a, img, s, b, dir, f)
+		"frostlord":
+			_frostlord(a, img, s, b, dir, f)
+		"voltking":
+			_voltking(a, img, s, b, dir, f)
+		"ironmech":
+			_ironmech(a, img, s, b, dir, f)
 
 
 ## 只往空白处画：背后的东西不能盖住已经画好的身体。
@@ -451,6 +459,196 @@ static func _mirror(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int,
 		a._px(img, cx - 2, t_top + 4, shard)
 		a._px(img, cx, t_top + 4, shard)
 		a._px(img, cx - 1, t_top + 5, shard)
+
+
+static func _pixel_path(a: Node, img: Image, points: Array[Vector2i], color: Color) -> void:
+	for i in range(1, points.size()):
+		for p: Vector2i in Geometry2D.bresenham_line(points[i - 1], points[i]):
+			a._px(img, p.x, p.y, color)
+
+
+## 熔岩领主：黑曜石肩甲裂开，火冠与胸前的岩浆随步伐忽明忽暗。
+static func _magma(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var cx: int = b["cx"]
+	var top: int = b["t_top"]
+	var left: int = b["t_left"]
+	var hw: int = s["hw"]
+	var hx: int = b["hx"]
+	var head: int = b["h_top"]
+	var rock := Color("#261b22")
+	var facet := Color("#65403b")
+	var lava := Color("#f04a24")
+	var hot := Color("#ffb13b") if f % 2 == 0 else Color("#ff872a")
+	a._rect(img, left + 2, top + 3, int(s["tw"]) - 4, 7, rock)
+	for flank: int in [-1, 1]:
+		var x := cx + flank * (11 if dir != SIDE else 9)
+		var shoulder := top + (2 if dir == SIDE and flank == 1 else 0)
+		a._rect(img, x - 4, shoulder - 2, 9, 8, rock)
+		a._rect(img, x - 5, shoulder, 11, 4, rock)
+		a._rect(img, x + flank - 2, shoulder - 4, 5, 3, facet)
+		a._rect(img, x + flank - 1, shoulder - 5, 2, 1, rock)
+		a._rect(img, x - 3, shoulder - 1, 6, 2, facet)
+		_pixel_path(a, img, [Vector2i(x + flank * 2, shoulder - 3), Vector2i(x, shoulder), Vector2i(x + flank, shoulder + 2), Vector2i(x - flank * 2, shoulder + 5)], lava)
+		a._px(img, x, shoulder, hot)
+		# 火舌先向外扬，再折回额角。
+		var horn := hx + hw / 2 + flank * 3
+		var tip := head - 5 - (1 if f % 2 == 0 else 0)
+		_pixel_path(a, img, [Vector2i(horn + flank * 3, tip), Vector2i(horn + flank * 3, head - 3), Vector2i(horn + flank, head - 1), Vector2i(horn, head + 1)], lava)
+		a._rect(img, horn - 1, head - 1, 3, 3, lava)
+		a._rect(img, horn, head - 2, 1, 3, hot)
+		a._px(img, horn + flank * 2, head - 3, hot)
+	var core_x := cx + (4 if dir == SIDE else 0)
+	var core_y := top + 6
+	_pixel_path(a, img, [Vector2i(core_x - 3, top + 1), Vector2i(core_x - 4, top + 4), Vector2i(core_x + 1, core_y), Vector2i(core_x - 1, top + 10), Vector2i(core_x + 2, top + 13)], lava)
+	_pixel_path(a, img, [Vector2i(core_x + 5, top + 2), Vector2i(core_x + 3, top + 5), Vector2i(core_x + 1, core_y)], lava)
+	if dir != UP:
+		a._rect(img, core_x - 2, core_y - 1, 5, 3, lava)
+		a._rect(img, core_x - 1, core_y, 3, 1, hot)
+		a._px(img, core_x, core_y, Color("#ffe050"))
+
+
+static func _ice_spike(a: Node, img: Image, x: int, base: int, tall: int, frost: Color) -> void:
+	a._rect(img, x - 2, base - 2, 5, 3, Color("#477ca3"))
+	a._rect(img, x - 1, base - tall + 2, 3, tall - 1, Color("#76b4d6"))
+	a._rect(img, x, base - tall, 1, tall, frost)
+	a._px(img, x - 1, base - 2, frost)
+
+
+## 极寒暴君：带亮面的冰柱、厚冰肩甲，以及菱形霜核。
+static func _frostlord(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var cx: int = b["cx"]
+	var top: int = b["t_top"]
+	var left: int = b["t_left"]
+	var tw: int = s["tw"]
+	var head: int = b["h_top"]
+	var hx: int = b["hx"]
+	var frost := Color(String(s["eye"]))
+	var ice := Color("#9ad8f0")
+	var shadow := Color("#253f62")
+	a._rect(img, left + 2, top + 1, tw - 4, 10, shadow)
+	for flank: int in [-1, 1]:
+		var x := cx + flank * (11 if dir != SIDE else 9)
+		var shoulder := top + (2 if dir == SIDE and flank == 1 else 0)
+		a._rect(img, x - 4, shoulder, 9, 5, Color("#477ca3"))
+		a._rect(img, x - 5, shoulder + 1, 11, 2, ice)
+		_ice_spike(a, img, x - flank * 2, shoulder + 2, 5, frost)
+		_ice_spike(a, img, x + flank * 2, shoulder + 2, 7, frost)
+		a._rect(img, x - 3, shoulder + 5, 7, 1, shadow)
+	var crown := hx + int(s["hw"]) / 2
+	_ice_spike(a, img, crown - 4, head + 2, 5, ice)
+	_ice_spike(a, img, crown + 4, head + 2, 6, ice)
+	_ice_spike(a, img, crown, head + 1, 7, frost)
+	a._rect(img, crown - 5, head + 2, 11, 1, Color("#63a0c3"))
+	var core_x := cx + (5 if dir == SIDE else 0)
+	var core_y := top + 6
+	var gem := ice if dir == UP or f % 2 == 1 else frost
+	for dy in range(-4, 5):
+		var half_width := 4 - absi(dy)
+		a._rect(img, core_x - half_width, core_y + dy, 2 * half_width + 1, 1, Color("#477ca3"))
+		if half_width > 0:
+			a._rect(img, core_x - half_width + 1, core_y + dy, half_width, 1, gem)
+			a._rect(img, core_x + 1, core_y + dy, half_width - 1, 1, Color("#76b4d6"))
+
+
+## 雷暴巨兽：两座黄铜线圈接通电弧，深色面甲里透出青白电光。
+static func _voltking(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var cx: int = b["cx"]
+	var top: int = b["t_top"]
+	var hx: int = b["hx"]
+	var head: int = b["h_top"]
+	var hw: int = s["hw"]
+	var brass := Color("#bd8b55")
+	var gold := Color("#f3cc83")
+	var violet := Color("#655298")
+	var cyan := Color(String(s["eye"]))
+	var plasma := Color("#e7ffff")
+	var coil_offset := 12 if dir != SIDE else 10
+	var pole_y := top - 8
+	var arc_y := pole_y - 2 + (1 if f in [1, 2] else 0)
+	var left_coil := cx - coil_offset
+	var right_coil := cx + coil_offset
+	var arc: Array[Vector2i] = [Vector2i(left_coil, pole_y), Vector2i(cx - 6, arc_y - 2), Vector2i(cx - 4, arc_y + 1), Vector2i(cx + 3, arc_y - 1), Vector2i(cx + 5, arc_y + 1), Vector2i(right_coil, pole_y)]
+	_pixel_path(a, img, arc, cyan)
+	var spark := arc[2 + f % 2]
+	a._px(img, spark.x, spark.y, plasma)
+	a._px(img, spark.x - 1, spark.y - 2, cyan)
+	for x: int in [left_coil, right_coil]:
+		a._rect(img, x - 4, top, 9, 4, Color("#352b57"))
+		a._rect(img, x - 3, top, 7, 1, violet)
+		a._rect(img, x - 1, pole_y, 3, 9, violet)
+		for y in range(pole_y + 2, top, 3):
+			a._rect(img, x - 3, y, 7, 1, brass)
+			a._rect(img, x - 2, y, 3, 1, gold)
+		a._rect(img, x - 1, pole_y - 1, 3, 2, cyan)
+		a._px(img, x, pole_y - 1, plasma)
+	a._rect(img, hx, head + 1, hw, 4, Color("#655688"))
+	if dir == UP:
+		a._rect(img, cx - 2, top + 2, 5, 9, violet)
+		a._rect(img, cx, top + 3, 1, 6, cyan)
+	else:
+		var visor_x := hx if dir == DOWN else hx + hw - 5
+		var visor_w := hw if dir == DOWN else 5
+		a._rect(img, visor_x, head + 3, visor_w, 3, Color("#1c172d"))
+		a._rect(img, visor_x + 1, head + 4, visor_w - 2, 1, cyan)
+		a._px(img, visor_x + visor_w - 2, head + 4, plasma)
+		var panel_x := cx + (4 if dir == SIDE else 0)
+		a._rect(img, panel_x - 4, top + 6, 9, 5, violet)
+		_pixel_path(a, img, [Vector2i(panel_x + 1, top + 6), Vector2i(panel_x - 1, top + 8), Vector2i(panel_x + 1, top + 8), Vector2i(panel_x - 1, top + 10)], cyan)
+
+
+## 铁幕机甲：圆顶观察舱、成对肩炮与带护圈的反应堆。
+static func _ironmech(a: Node, img: Image, s: Dictionary, b: Dictionary, dir: int, f: int) -> void:
+	var cx: int = b["cx"]
+	var top: int = b["t_top"]
+	var left: int = b["t_left"]
+	var tw: int = s["tw"]
+	var hx: int = b["hx"]
+	var head: int = b["h_top"]
+	var hw: int = s["hw"]
+	var steel := Color(String(s["skin"]))
+	var dark := Color("#242b37")
+	var bevel := Color("#9babba")
+	var amber := Color(String(s["eye"]))
+	a._rect(img, left + 2, top + 2, tw - 4, 11, dark)
+	a._rect(img, left + 3, top + 3, tw - 6, 8, steel)
+	for x: int in [left + 3, left + tw - 4]:
+		a._px(img, x, top + 3, bevel)
+		a._px(img, x, top + 10, bevel)
+	for flank: int in [-1, 1]:
+		var x := cx + flank * (14 if dir != SIDE else 11)
+		var shoulder := top - 1 + (3 if dir == SIDE and flank == 1 else 0)
+		a._rect(img, x - 4, shoulder - 5, 9, 11, dark)
+		a._rect(img, x - 5, shoulder - 3, 11, 7, steel)
+		a._rect(img, x - 4, shoulder - 5, 8, 1, bevel)
+		a._rect(img, x - 4, shoulder + 3, 8, 1, dark)
+		for barrel: int in [-2, 2]:
+			var port_y := shoulder + (1 if dir != UP else -3)
+			a._rect(img, x + barrel - 1, port_y - 1, 3, 3, dark)
+			a._px(img, x + barrel, port_y - 1, bevel)
+			a._px(img, x + barrel, port_y, Color("#151922"))
+		a._px(img, x, shoulder - 3, amber)
+	# 圆顶逐层收窄，最亮的钢片沿顶边布置。
+	a._rect(img, hx - 1, head + 1, hw + 2, 6, dark)
+	a._rect(img, hx, head - 1, hw, 7, steel)
+	a._rect(img, hx + 2, head - 2, hw - 4, 2, steel)
+	a._rect(img, hx + 2, head - 2, hw - 4, 1, bevel)
+	a._rect(img, hx + 2, head - 6, 1, 5, bevel)
+	a._px(img, hx + 2, head - 6, amber)
+	if dir == UP:
+		for y in range(top + 5, top + 11, 2):
+			a._rect(img, cx - 4, y, 9, 1, dark)
+		return
+	var visor_x := hx + (2 if dir == DOWN else hw - 5)
+	var visor_w := hw - 4 if dir == DOWN else 5
+	a._rect(img, visor_x, head + 1, visor_w, 4, dark)
+	a._rect(img, visor_x + 1, head + 2, visor_w - 2, 2, Color("#733821"))
+	a._rect(img, visor_x + visor_w / 2 - 1, head + 2, 2, 1, amber)
+	var core_x := cx + (5 if dir == SIDE else 0)
+	var core_y := top + 7
+	a._disc(img, core_x, core_y, 5.0, 4.0, dark)
+	a._disc(img, core_x, core_y, 4.0, 3.0, Color("#b83f25"))
+	a._disc(img, core_x, core_y, 2.6, 2.0, amber if f % 2 == 0 else Color("#ff6526"))
+	a._rect(img, core_x - 1, core_y - 1, 2, 2, Color("#ffdf90"))
 
 
 ## 分裂小怪：一团肉冻，弹跳时压扁再拉长。
