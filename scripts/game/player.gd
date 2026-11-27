@@ -1101,7 +1101,6 @@ func apply_trophy(id: String) -> void:
 			sticky_mult = GameData.TROPHY_STICKY
 		"ash":
 			status_bonus = GameData.TROPHY_STATUS_TIME + (ELEMENTAL_STATUS_BONUS if hero_id == "elemental" else 0.0)
-			status_bonus += frost_dur_mult - 1.0
 		"soil":
 			blast_boss_mult = GameData.TROPHY_BLAST_BOSS
 		"shard":
@@ -1109,9 +1108,7 @@ func apply_trophy(id: String) -> void:
 		"magma_core":
 			magma_fire_mult = GameData.TROPHY_MAGMA_FIRE
 		"frost_heart":
-			if frost_dur_mult == 1.0:
-				frost_dur_mult = GameData.TROPHY_FROST_MULT
-				status_bonus += frost_dur_mult - 1.0
+			frost_dur_mult = GameData.TROPHY_FROST_MULT
 		"volt_coil":
 			volt_rate_mult = GameData.TROPHY_VOLT_RATE
 		"mech_chip":

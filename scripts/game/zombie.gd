@@ -570,11 +570,12 @@ func apply_chill(amount: float) -> void:
 		return
 	_burn_t = 0.0
 	_blue_burn_t = 0.0
-	_chill_t = GameData.CHILL_TIME + _status_bonus()
+	var frost_mult: float = float(game.player.frost_dur_mult) if game != null and game.player != null and "frost_dur_mult" in game.player else 1.0
+	_chill_t = (GameData.CHILL_TIME + _status_bonus()) * frost_mult
 	_chill += amount
 	if _chill >= 1.0 and not is_boss and _frozen_t <= 0.0:
 		_chill = 0.0
-		_frozen_t = GameData.FREEZE_TIME * (0.5 if kind == "tank" else 1.0)
+		_frozen_t = GameData.FREEZE_TIME * (0.5 if kind == "tank" else 1.0) * frost_mult
 		_fuse = -1.0
 		_windup = -1.0
 		if _brain != null:

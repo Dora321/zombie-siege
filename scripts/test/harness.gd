@@ -1635,7 +1635,10 @@ func _arena_wave_table(_g: Variant) -> void:
 		for kind: String in GameData.BOSSES.keys():
 			if GameData.WAVES[i].has(kind):
 				seen_boss[kind] = true
-	_check(seen_boss.size() == GameData.BOSSES.size(), "八道 Boss 都排进了波次表（%d/%d）" % [seen_boss.size(), GameData.BOSSES.size()])
+	for kind: String in GameData.BOSS_RUSH_ORDER:
+		if GameData.BOSSES.has(kind):
+			seen_boss[kind] = true
+	_check(seen_boss.size() == GameData.BOSSES.size(), "全部 %d 道 Boss 都排进了波次或连战表（%d/%d）" % [GameData.BOSSES.size(), seen_boss.size(), GameData.BOSSES.size()])
 	_check(int(GameData.WAVES[11].get("stalker", 0)) <= 6, "第 12 波潜伏者减到 6 只以内")
 	var odd_boss := []
 	for wave in range(1, GameData.MAX_WAVE, 2):
