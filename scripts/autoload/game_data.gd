@@ -219,6 +219,10 @@ const TROPHIES := {
 	"ash": {"name": "坟主骨灰", "desc": "冰冻和燃烧多持续 0.5 秒"},
 	"soil": {"name": "掘地晶石", "desc": "手雷、粘弹和榴弹对 Boss 伤害 +10%"},
 	"shard": {"name": "镜面碎片", "desc": "镜面反弹的伤害再减半"},
+	"magma_core": {"name": "熔岩核", "desc": "火焰与爆炸伤害 +15%"},
+	"frost_heart": {"name": "永冻冰心", "desc": "寒冰减速与冰冻持续 +35%"},
+	"volt_coil": {"name": "过载线圈", "desc": "电弧与炮塔射速 +15%"},
+	"mech_chip": {"name": "机甲芯片", "desc": "换弹加速 15%、冲刺冷却 -15%"},
 }
 const TROPHY_HP := 25.0
 const TROPHY_DOT := 0.5
@@ -227,6 +231,11 @@ const TROPHY_STICKY := 1.15
 const TROPHY_STATUS_TIME := 0.5
 const TROPHY_BLAST_BOSS := 1.1
 const TROPHY_REFLECT := 0.5
+const TROPHY_MAGMA_FIRE := 1.15
+const TROPHY_FROST_MULT := 1.35
+const TROPHY_VOLT_RATE := 1.15
+const TROPHY_MECH_RELOAD := 0.85
+const TROPHY_MECH_DASH := 0.85
 
 ## 僵尸属性：hit_r 是子弹判定半径，center 是身体中心离脚底的高度。
 ## desc 和 tip 是图鉴文案，weak 是弱点短标签（/ 分隔，图鉴和商店情报都用），is_boss 的配置在 BOSSES。
@@ -347,6 +356,30 @@ const ZOMBIES := {
 		"coins": 500, "score": 3000, "hit_r": 18.0, "center": 20.0, "knock_res": 0.98, "aggro": 170.0,
 		"weak": "榴弹/火焰/电弧", "blood": "#4a2a6a", "is_boss": true,
 	},
+	"magma": {
+		"name": "熔岩领主", "hp": 1750.0, "speed": 22.0, "damage": 34.0, "attack_cd": 1.3,
+		"coins": 340, "score": 1850, "hit_r": 16.0, "center": 18.0, "knock_res": 0.97, "aggro": 165.0,
+		"resist": "火焰/燃烧", "weak": "寒冰/淬火/碎冰", "blood": "#c04a18", "is_boss": true,
+		"desc": "火焰抗性 75%，滚出巨型火球与熔岩重砸", "tip": "用冰冻枪或冰霜塔直接淬火脆化，冰灭炎球可破防",
+	},
+	"frostlord": {
+		"name": "极寒暴君", "hp": 1800.0, "speed": 20.0, "damage": 32.0, "attack_cd": 1.3,
+		"coins": 350, "score": 1900, "hit_r": 16.0, "center": 18.0, "knock_res": 0.97, "aggro": 165.0,
+		"resist": "寒冰/减速", "weak": "火焰/爆炸/龙息", "blood": "#40a8d8", "is_boss": true,
+		"desc": "寒冰抗性 75% 且冻结周围炮塔，滚出巨型冰球", "tip": "用喷火器、龙息霰弹或榴弹点燃融化，火融冰球可破防",
+	},
+	"voltking": {
+		"name": "雷暴巨兽", "hp": 1680.0, "speed": 26.0, "damage": 33.0, "attack_cd": 1.2,
+		"coins": 360, "score": 1950, "hit_r": 15.0, "center": 17.0, "knock_res": 0.96, "aggro": 170.0,
+		"resist": "电弧/磁暴(吸电回盾)", "weak": "狙击/霰弹/回旋镖/闪光", "blood": "#7850d8", "is_boss": true,
+		"desc": "吸收电弧伤害并回盾，蓄力局部电磁脉冲瘫痪炮塔", "tip": "切物理穿透输出；闪光或贴脸霰弹打断脉冲可反向超频炮塔",
+	},
+	"ironmech": {
+		"name": "铁幕机甲", "hp": 1950.0, "speed": 19.0, "damage": 35.0, "attack_cd": 1.35,
+		"coins": 390, "score": 2100, "hit_r": 17.0, "center": 19.0, "knock_res": 0.98, "aggro": 165.0,
+		"resist": "爆炸/重狙单发", "weak": "电弧/冲锋枪高频连射", "blood": "#586478", "is_boss": true,
+		"desc": "防爆装甲大幅减免爆炸与重狙，投掷废车砸阵地", "tip": "用电弧枪过载，或冲锋枪/机枪塔高频连射 15 发烧毁力场破防",
+	},
 }
 
 ## Boss 的阶段表。at 是进入该阶段的血量比例，moves 是招式池，enter 是一进阶段就放的招。
@@ -438,6 +471,54 @@ const BOSSES := {
 				"enter": "shield", "moves": ["fog", "fan", "fogring", "scream", "wave", "shield"]},
 			{"at": 0.25, "name": "末日狂暴", "sub": "落石如雨，别停下", "speed": 1.4, "gap": [1.1, 1.8], "rocks": 7, "tint": "#ff9090",
 				"enter": "storm", "moves": ["charge2", "storm", "wave", "slam", "elites", "fog"]},
+		],
+	},
+	"magma": {
+		"title": "熔岩领主", "warn": "抗火焰！用冰冻枪或冰霜塔直接淬火脆化，冰灭炎球可破防", "trophy": "magma_core",
+		"drops": ["ammo_crate", "armor", "medkit"], "shield": 0.14, "slam_scale": 1.15, "element": "fire",
+		"phases": [
+			{"at": 1.0, "name": "熔壳", "sub": "抗火怕冰，寒冰命中即刻淬火脆化", "speed": 1.0, "gap": [2.0, 2.8], "rocks": 3,
+				"moves": ["fire_orb", "slam", "rocks"]},
+			{"at": 0.6, "name": "喷发", "sub": "用冰熄灭巨型火球可触发 3 秒破防", "speed": 1.12, "gap": [1.5, 2.2], "rocks": 4, "tint": "#ffaa70",
+				"enter": "fire_orb", "call": ["exploder", "runner"], "moves": ["fire_orb", "wave", "slam", "call"]},
+			{"at": 0.28, "name": "赤核", "sub": "高温狂暴！寒冰与碎冰双倍重伤", "speed": 1.25, "gap": [1.2, 1.8], "rocks": 5, "tint": "#ff7850",
+				"enter": "shield", "moves": ["fire_orb", "storm", "wave", "slam"]},
+		],
+	},
+	"frostlord": {
+		"title": "极寒暴君", "warn": "抗寒冰且冻结周边炮塔！换喷火、龙息或榴弹融化破防", "trophy": "frost_heart",
+		"drops": ["frag", "ammo_crate", "armor"], "shield": 0.18, "slam_scale": 1.1, "element": "ice",
+		"phases": [
+			{"at": 1.0, "name": "霜甲", "sub": "抗冰怕火，点燃可融化极寒光环并解冻炮塔", "speed": 1.0, "gap": [2.0, 2.8], "rocks": 2,
+				"moves": ["ice_orb", "fan", "slam"]},
+			{"at": 0.58, "name": "冰封", "sub": "用火焰或爆炸融爆冰球可触发 3 秒破防", "speed": 1.08, "gap": [1.5, 2.2], "tint": "#b0f0ff",
+				"enter": "shield", "call": ["tank", "spitter"], "moves": ["ice_orb", "shield", "wave", "call"]},
+			{"at": 0.25, "name": "永冬", "sub": "寒潮来袭，保持火焰灼烧压制冰盾", "speed": 1.18, "gap": [1.2, 1.8], "tint": "#88e0ff",
+				"enter": "ice_orb", "moves": ["ice_orb", "wave", "fan", "storm"]},
+		],
+	},
+	"voltking": {
+		"title": "雷暴巨兽", "warn": "吸收电弧回盾且瘫痪炮塔！换狙击、霰弹或回旋镖破核", "trophy": "volt_coil",
+		"drops": ["flash", "ammo_crate", "damage"], "shield": 0.14, "slam_scale": 1.0, "element": "volt",
+		"phases": [
+			{"at": 1.0, "name": "蓄电", "sub": "切勿用电弧打它，物理狙击/霰弹/回旋镖克制", "speed": 1.05, "gap": [1.9, 2.6],
+				"moves": ["charge", "emp_pulse", "wave"]},
+			{"at": 0.58, "name": "磁暴", "sub": "打断脉冲或连冲可反向超频我方全部炮塔 5 秒", "speed": 1.2, "gap": [1.5, 2.1], "tint": "#c8b0ff",
+				"enter": "emp_pulse", "break": 280.0, "moves": ["emp_pulse", "charge2", "bungee", "wave"]},
+			{"at": 0.28, "name": "天雷", "sub": "高机动雷霆连冲，闪光弹一击破防", "speed": 1.32, "gap": [1.2, 1.7], "tint": "#b090ff",
+				"enter": "bungee", "break": 260.0, "moves": ["charge2", "emp_pulse", "bungee", "storm"]},
+		],
+	},
+	"ironmech": {
+		"title": "铁幕机甲", "warn": "防爆抗重狙！用电弧过载，或冲锋枪高频连射 15 发烧毁力场", "trophy": "mech_chip",
+		"drops": ["inf_ammo", "armor", "ammo_crate"], "shield": 0.16, "slam_scale": 1.2, "element": "mech",
+		"phases": [
+			{"at": 1.0, "name": "铁幕", "sub": "抗爆炸与单发重伤；电弧 2 倍过载、高频连射破场", "speed": 1.0, "gap": [2.0, 2.8], "rocks": 3,
+				"moves": ["car_toss", "slam", "rocks"]},
+			{"at": 0.58, "name": "压制", "sub": "连射 15 发或电弧扫射即可烧毁力场触发 3 秒破防", "speed": 1.08, "gap": [1.5, 2.2], "rocks": 4, "tint": "#b8c8e0",
+				"enter": "shield", "call": ["shielder", "tank"], "moves": ["car_toss", "shield", "call", "wave"]},
+			{"at": 0.25, "name": "过载", "sub": "全弹发射！冲锋枪与电弧塔全力倾泻", "speed": 1.2, "gap": [1.2, 1.8], "rocks": 5, "tint": "#ffc890",
+				"enter": "car_toss", "moves": ["car_toss", "storm", "wave", "slam"]},
 		],
 	},
 }
@@ -572,11 +653,14 @@ const WAVES := [
 	{"name": "最终围城", "walker": 22, "runner": 16, "spitter": 5, "exploder": 6, "tank": 3, "shielder": 3, "stalker": 3, "overlord": 1},
 ]
 
-const ENDLESS_BOSSES: Array[String] = ["colossus", "mother", "grave", "burrower", "empress", "butcher"]
+const ENDLESS_BOSSES: Array[String] = [
+	"colossus", "mother", "magma", "frostlord", "grave", "voltking", "burrower", "ironmech", "empress", "butcher",
+]
 ## 无尽波的 Boss 名称映射到现有僵尸种类，沿用原本的素材和阶段配置。
 const ENDLESS_BOSS_SPAWN := {
 	"colossus": "colossus", "mother": "plague", "grave": "graveborn", "burrower": "burrowlord",
 	"empress": "mirror", "butcher": "boss", "king": "overlord",
+	"magma": "magma", "frostlord": "frostlord", "voltking": "voltking", "ironmech": "ironmech",
 }
 
 
@@ -777,6 +861,18 @@ func short_name(kind: String) -> String:
 
 func weakness(kind: String) -> String:
 	return String(ZOMBIES[kind].get("weak", ""))
+
+
+func boss_resist(kind: String) -> String:
+	if ZOMBIES.has(kind) and String(ZOMBIES[kind].get("resist", "")) != "":
+		return String(ZOMBIES[kind]["resist"])
+	if kind == "colossus":
+		return "低伤高频(<16)"
+	if kind == "mirror":
+		return "正面直射"
+	if kind == "burrowlord":
+		return "钻地免直射"
+	return ""
 
 
 func danger_hp_mult(d: int) -> float:
@@ -1010,7 +1106,8 @@ const HEROES := {
 
 
 const BOSS_RUSH_ORDER: Array[String] = [
-	"vanguard", "boss", "colossus", "mother", "graveborn", "burrowlord", "mirror", "overlord",
+	"vanguard", "boss", "magma", "colossus", "frostlord", "plague",
+	"voltking", "graveborn", "ironmech", "burrowlord", "mirror", "overlord",
 ]
 const BOSS_RUSH_START_COINS := 360
 
