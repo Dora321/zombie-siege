@@ -16,6 +16,8 @@ const ICE_SLOW := 0.58
 const ICE_FREEZE := 3.5
 const CAR_R := 34.0
 const BUNGEE_R := 16.0
+const EMP_COLOR := Color("#bd80ff")
+const FROST_COLOR := Color("#8cecff")
 
 class Orb:
 	var kind: String
@@ -129,7 +131,7 @@ func _exit_tree() -> void:
 	_end_player_chill()
 
 
-## 施法者死了，它还没落地的招式也作废。
+## 施法者死亡或电磁脉冲被打断时，撤掉它所有未结算的招式。
 func clear_owner(owner_node: Variant) -> void:
 	var i := zones.size() - 1
 	while i >= 0:
@@ -144,7 +146,7 @@ func clear_owner(owner_node: Variant) -> void:
 ## 取消仍在蓄力的地面预警。已经发射的球和空投继续飞行。
 func cancel_cast(owner_node: Variant) -> void:
 	for z: Zone in zones.duplicate():
-		if z.owner_ref == owner_node and (z.kind == "slam" or z.kind == "warn"):
+		if z.owner_ref == owner_node and z.kind in ["slam", "warn", "emp_pulse", "frost_ring"]:
 			zones.erase(z)
 
 
@@ -277,6 +279,25 @@ func drop_car(pos: Vector2, delay: float, damage: float, owner_node: Variant) ->
 func bungee_drop(pos: Vector2, delay: float, spawn_kind: String, owner_node: Variant) -> void:
 	var at: Vector2 = map.unstick(_inside_map(pos), 5.0, map.BLOCK_ZOMBIE)
 	_zone("bungee", at, BUNGEE_R, delay, 0.0, owner_node).spawn_kind = spawn_kind
+
+
+func emp_pulse(pos: Vector2, r: float, delay: float, owner_node: Variant) -> void:
+	_zone("emp_pulse", pos, r, delay, 16.0, owner_node)
+
+
+func emp_pending(owner_node: Variant) -> bool:
+	for z: Zone in zones:
+		if z.owner_ref == owner_node and z.kind == "emp_pulse":
+			return true
+	return false
+
+
+func frost_ring(pos: Vector2, r: float, delay: float, damage: float, owner_node: Variant) -> void:
+	_zone("frost_ring", pos, r, delay, damage, owner_node)
+
+
+func thaw_turrets() -> void:
+	_frozen_turrets.clear()
 
 
 func _inside_map(pos: Vector2) -> Vector2:
@@ -545,6 +566,33 @@ func _land(z: Zone) -> void:
 				if not Harness.automated():
 					game.fx.text(z.pos + Vector2(0, -20), "空降突袭！", Color("#fff0d0"))
 				Sfx.play("summon_pop", -2.0, 0.15)
+		"emp_pulse", "frost_ring":
+			_land_element_ring(z)
+
+
+func _land_element_ring(z: Zone) -> void:
+	var emp := z.kind == "emp_pulse"
+	var player: Variant = game.player
+	if player != null and player.alive and player.position.distance_to(z.pos) <= z.r:
+		var can_chill: bool = not emp and player.invuln <= 0.0 and not game.god_mode
+		player.take_damage(z.damage, z.pos)
+		if can_chill and player.alive:
+			_chill_player(player)
+	game.fx.ring(z.pos, z.r, 0.45, EMP_COLOR if emp else FROST_COLOR)
+	for i in 8:
+		var at := z.pos + Vector2.from_angle(i * TAU / 8.0) * z.r * 0.78
+		if emp:
+			game.fx.zap(at)
+		else:
+			game.fx.frost(at)
+	if emp:
+		if game.has_method("jam_turrets_near"):
+			game.jam_turrets_near(z.pos, z.r, 3.5)
+		Sfx.play("arc")
+	else:
+		if game.has_method("freeze_turrets_near"):
+			game.freeze_turrets_near(z.pos, z.r, 3.0)
+		Sfx.play("cryo")
 
 
 func _draw() -> void:
@@ -569,11 +617,14 @@ func _draw() -> void:
 
 ## 红圈：边框常亮，内圈随蓄力涨满，快落地时高频闪。
 func _draw_zone(z: Zone) -> void:
-	var ratio := 1.0 - clampf(z.t / z.dur, 0.0, 1.0)
+	var ratio := 1.0 - clampf(z.t / maxf(z.dur, 0.001), 0.0, 1.0)
 	var at := z.pos.round()
 	var edge := Color("#ff3020")
 	var fill := Color(1.0, 0.15, 0.1, 0.1 + ratio * 0.2)
 	match z.kind:
+		"emp_pulse", "frost_ring":
+			_draw_element_ring(z, ratio)
+			return
 		"bungee":
 			_draw_bungee_target(at, z.r, ratio)
 			return
@@ -603,6 +654,26 @@ func _draw_zone(z: Zone) -> void:
 	draw_circle(at, z.r, fill)
 	draw_circle(at, z.r * ratio, Color(fill.r, fill.g, fill.b, fill.a + 0.15))
 	draw_arc(at, z.r, 0.0, TAU, maxi(20, int(z.r)), edge, 1.0)
+
+
+func _draw_element_ring(z: Zone, ratio: float) -> void:
+	var emp := z.kind == "emp_pulse"
+	var color := EMP_COLOR if emp else FROST_COLOR
+	var pulse := sin(ratio * TAU * 4.0) * 0.5 + 0.5
+	var at := z.pos.round()
+	draw_circle(at, z.r, Color(color, 0.08 + ratio * 0.12))
+	draw_arc(at, z.r, 0.0, TAU, 72, Color(color, 0.7 + pulse * 0.3), 2.0)
+	draw_arc(at, z.r * lerpf(0.1, 1.0, ratio), 0.0, TAU, 64, Color(FROST_COLOR, 0.35 + pulse * 0.5), 1.0)
+	for i in 8:
+		var dir := Vector2.from_angle(i * TAU / 8.0)
+		var tip := at + dir * (z.r - 3.0)
+		var foot := tip - dir * 9.0
+		if emp:
+			var bend := tip - dir * 5.0 + dir.orthogonal() * 4.0
+			draw_polyline(PackedVector2Array([foot, bend, tip]), FROST_COLOR, 1.0)
+		else:
+			draw_line(foot, tip, color, 1.0)
+			draw_line(tip - dir * 4.0 - dir.orthogonal() * 3.0, tip - dir * 4.0 + dir.orthogonal() * 3.0, color, 1.0)
 
 
 func _draw_bungee_target(at: Vector2, radius: float, ratio: float) -> void:

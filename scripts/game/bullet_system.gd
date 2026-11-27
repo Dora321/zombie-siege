@@ -149,7 +149,7 @@ func _step_bullet(b: Bullet, dt: float) -> bool:
 			return true
 		var dir := b.vel.normalized()
 		var damage: float = b.damage
-		var src := "buckshot" if b.buckshot else "bullet"
+		var src := "buckshot" if b.buckshot else ("ice" if b.chill > 0.0 else "bullet")
 		# 元素弹能打断反向蓄力，包括镜面女皇的正面。
 		if b.chill > 0.0 or b.burn:
 			best.counter_boss_cast("ice" if b.chill > 0.0 else "fire")
