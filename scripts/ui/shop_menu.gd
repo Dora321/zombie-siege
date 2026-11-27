@@ -77,12 +77,12 @@ func refresh() -> void:
 		var boss_kind: String = GameData.BOSS_RUSH_ORDER[idx]
 		title_label.text = "补给站  下一战：第 %d/%d 场 %s" % [next_wave, GameData.boss_rush_wave_count(), GameData.boss_rush_wave_name(next_wave)]
 		intel_label.text = "Boss 连战：%s + 护卫小队" % GameData.short_name(boss_kind)
-		weak_label.text = "Boss：%s  怕：%s" % [GameData.short_name(boss_kind), GameData.weakness(boss_kind)]
+		weak_label.text = _boss_counter_line(boss_kind)
 		weak_label.visible = true
 		start_button.text = "开始第 %d 场连战" % next_wave
 	else:
 		title_label.text = "补给站  下一波：第 %d 波 %s%s" % [next_wave, GameData.wave_name(next_wave), game.events.forecast_text()]
-		_show_intel(GameData.wave_preview(next_wave))
+		_show_intel(GameData.wave_preview(next_wave), next_wave)
 		start_button.text = "开始第 %d 波" % next_wave
 	status_label.text = "金币 %d   生命 %d/%d   基地 %d/%d   分数 %d   枪袋 %d/%d" % [
 		game.coins, roundi(p.hp), roundi(p.max_hp), roundi(game.base.hp), roundi(game.base.max_hp), game.score,
@@ -101,9 +101,9 @@ func refresh() -> void:
 		rows.add_child(_make_row(item))
 
 
-## 下一波情报：怪种和数量一行，Boss 或精英的弱点一行（太长就截断成「…」）。
+## 下一波情报：怪种和数量一行，无尽双 Boss 各占一行对策。
 ## 出怪方向每批随机，所以只写四边来袭。
-func _show_intel(preview: Dictionary) -> void:
+func _show_intel(preview: Dictionary, wave := 0) -> void:
 	var parts: Array[String] = []
 	for k: Dictionary in preview["kinds"]:
 		parts.append("%s×%d" % [k["name"], k["count"]])
@@ -111,9 +111,17 @@ func _show_intel(preview: Dictionary) -> void:
 	var boss: String = preview["boss_kind"]
 	var line := ""
 	if boss != "":
-		line = "Boss：%s  怕：%s" % [GameData.short_name(boss), GameData.weakness(boss)]
-		if String(preview["hint"]) != "":
-			line += " · " + String(preview["hint"])
+		var endless_bosses := GameData.endless_boss_kinds(wave)
+		if endless_bosses.size() > 1:
+			var counters: Array[String] = []
+			for kind in endless_bosses:
+				counters.append(_boss_counter_line(String(GameData.ENDLESS_BOSS_SPAWN[kind])))
+			line = "\n".join(counters)
+		else:
+			line = _boss_counter_line(boss)
+			var hint: String = preview["hint"]
+			if hint != "":
+				line += ("\n" if GameData.boss_resist(boss) != "" else " · ") + hint
 	else:
 		var weak: Array[String] = []
 		for k: Dictionary in preview["kinds"]:
@@ -125,6 +133,15 @@ func _show_intel(preview: Dictionary) -> void:
 			line = String(preview["hint"])
 	weak_label.text = line
 	weak_label.visible = line != ""
+
+
+func _boss_counter_line(kind: String) -> String:
+	var boss_name := GameData.short_name(kind)
+	var resist := GameData.boss_resist(kind)
+	var weak := GameData.weakness(kind)
+	if resist != "":
+		return "Boss：%s  抗：%s  怕：%s" % [boss_name, resist, weak]
+	return "Boss：%s  怕：%s" % [boss_name, weak]
 
 
 func _make_row(item: Dictionary) -> Control:
