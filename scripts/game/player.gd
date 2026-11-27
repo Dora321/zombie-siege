@@ -56,11 +56,15 @@ var dash_dir := Vector2.RIGHT
 var invuln := 0.0
 ## 持续伤害系数，母体血清减半。
 var dot_mult := 1.0
-# 后四个 Boss 的战利品：粘弹伤害、冰火持续、爆炸打 Boss、镜面反弹伤害
+# Boss 战利品的伤害、状态和射速倍率。
 var sticky_mult := 1.0
 var status_bonus := 0.0
 var blast_boss_mult := 1.0
 var reflect_mult := 1.0
+var magma_fire_mult := 1.0
+var frost_dur_mult := 1.0
+var volt_rate_mult := 1.0
+var mech_reload_mult := 1.0
 var recoil_px := 0.0
 var fired_kick := 0.0
 
@@ -211,6 +215,8 @@ func export_run_state() -> Dictionary:
 		"used_items": used_items.duplicate(true), "selected_item": selected_item,
 		"dot_mult": dot_mult, "sticky_mult": sticky_mult, "status_bonus": status_bonus,
 		"blast_boss_mult": blast_boss_mult, "reflect_mult": reflect_mult,
+		"magma_fire_mult": magma_fire_mult, "frost_dur_mult": frost_dur_mult,
+		"volt_rate_mult": volt_rate_mult, "mech_reload_mult": mech_reload_mult,
 	}
 
 
@@ -272,6 +278,10 @@ func import_run_state(d: Dictionary) -> void:
 	status_bonus = _saved_number(d, "status_bonus", status_bonus)
 	blast_boss_mult = _saved_number(d, "blast_boss_mult", blast_boss_mult)
 	reflect_mult = _saved_number(d, "reflect_mult", reflect_mult)
+	magma_fire_mult = _saved_number(d, "magma_fire_mult", 1.0)
+	frost_dur_mult = _saved_number(d, "frost_dur_mult", 1.0)
+	volt_rate_mult = maxf(_saved_number(d, "volt_rate_mult", 1.0), 1.0)
+	mech_reload_mult = _saved_number(d, "mech_reload_mult", 1.0)
 
 	alive = hp > 0.0
 	visible = alive
@@ -820,7 +830,7 @@ func start_reload() -> void:
 			game.fx.text(position + Vector2(0, -22), "没有备弹！", Color("#ff8060"))
 			Sfx.play("empty")
 		return
-	reload_total = float(stats[weapon_id]["reload"])
+	reload_total = float(stats[weapon_id]["reload"]) * mech_reload_mult
 	if _has_perk("overclock"):
 		reload_total *= 0.75
 	reload_t = reload_total
@@ -875,6 +885,8 @@ func _try_fire() -> void:
 	if not free_shot:
 		st["mag"] = int(st["mag"]) - 1
 	cooldown = float(s["cooldown"])
+	if weapon_id == "arc":
+		cooldown /= volt_rate_mult
 	if overdrive:
 		cooldown *= 0.70
 	if evolution(weapon_id) == "pulse_minigun":
@@ -898,6 +910,9 @@ func _try_fire() -> void:
 func _fire_mode(s: Dictionary, muzzle: Vector2, damage: float) -> void:
 	if hero_id == "elemental" and weapon_id in ["cryo", "flamer", "arc"]:
 		damage *= 1.2
+	# 榴弹的熔岩核加成在 game.explode() 落地结算。
+	if weapon_id == "flamer":
+		damage *= magma_fire_mult
 	var mode := String(s.get("mode", "bullet"))
 	var flash := String(s.get("flash", ""))
 	var evo := evolution(weapon_id)
@@ -1086,10 +1101,23 @@ func apply_trophy(id: String) -> void:
 			sticky_mult = GameData.TROPHY_STICKY
 		"ash":
 			status_bonus = GameData.TROPHY_STATUS_TIME + (ELEMENTAL_STATUS_BONUS if hero_id == "elemental" else 0.0)
+			status_bonus += frost_dur_mult - 1.0
 		"soil":
 			blast_boss_mult = GameData.TROPHY_BLAST_BOSS
 		"shard":
 			reflect_mult = GameData.TROPHY_REFLECT
+		"magma_core":
+			magma_fire_mult = GameData.TROPHY_MAGMA_FIRE
+		"frost_heart":
+			if frost_dur_mult == 1.0:
+				frost_dur_mult = GameData.TROPHY_FROST_MULT
+				status_bonus += frost_dur_mult - 1.0
+		"volt_coil":
+			volt_rate_mult = GameData.TROPHY_VOLT_RATE
+		"mech_chip":
+			if mech_reload_mult == 1.0:
+				mech_reload_mult = GameData.TROPHY_MECH_RELOAD
+				dash_cd_base *= GameData.TROPHY_MECH_DASH
 
 
 func heal(amount: float) -> void:

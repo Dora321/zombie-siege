@@ -7,6 +7,7 @@ const BARREL_TINTS := {
 	"mortar": Color("#ffb868"), "tesla": Color("#d09cff"),
 }
 const NOVA_STUN_RADIUS := 72.0
+const FROZEN_TINT := Color(0.6, 0.95, 1.4)
 
 ## 复用榴弹弹道和落地特效，伤害只结算给僵尸。炮塔被摧毁后，已发射的炮弹继续飞行。
 class MortarImpact extends Node:
@@ -41,7 +42,11 @@ var cell := 0
 var hp := MAX_HP_BASE
 var max_hp := MAX_HP_BASE
 var alive := true
+var freeze_t := 0.0
+var local_jam_t := 0.0
+var overclock_t := 0.0
 
+var _freeze_duration := 0.0
 var _cooldown := 0.0
 var _scan_t := 0.0
 var _target: Variant = null
@@ -89,15 +94,56 @@ func _range() -> float:
 	return (float(spec["range_base"]) + float(spec["range_step"]) * (int(game.turret_level) - 1)) * game.events.turret_range
 
 
+func apply_freeze(seconds: float) -> void:
+	if seconds <= 0.0:
+		return
+	freeze_t = maxf(freeze_t, seconds)
+	_freeze_duration = maxf(_freeze_duration, seconds)
+	modulate = FROZEN_TINT
+	_target = null
+	queue_redraw()
+
+
+func thaw() -> void:
+	freeze_t = 0.0
+	_freeze_duration = 0.0
+	modulate = Color.WHITE
+	queue_redraw()
+
+
+func apply_local_jam(seconds: float) -> void:
+	local_jam_t = maxf(local_jam_t, seconds)
+
+
+func apply_overclock(seconds: float) -> void:
+	overclock_t = maxf(overclock_t, seconds)
+
+
 func _physics_process(dt: float) -> void:
 	_cooldown -= dt
 	_scan_t -= dt
 	_flash_t -= dt
 	_bar_t -= dt
 	_kick = move_toward(_kick, 0.0, dt * 26.0)
-	if game.events.jammed():
+	local_jam_t = maxf(local_jam_t - dt, 0.0)
+	overclock_t = maxf(overclock_t - dt, 0.0)
+	if freeze_t > 0.0:
+		freeze_t = maxf(freeze_t - dt, 0.0)
+		if freeze_t > 0.0:
+			queue_redraw()
+			return
+		thaw()
+	if game.events.jammed() or local_jam_t > 0.0:
+		modulate = Color.WHITE
 		_tick_jam()
 		return
+	if overclock_t > 0.0:
+		var frame := Engine.get_physics_frames() + cell
+		modulate = Color(1.25 + 0.2 * sin(frame * 0.2), 1.12, 0.68)
+		if frame % 17 == 0:
+			game.fx.spark(position + Vector2(0, -9))
+	elif modulate != Color.WHITE:
+		modulate = Color.WHITE
 	if _jam_shown:
 		_jam_shown = false
 		base_sprite.modulate = Color.WHITE
@@ -152,6 +198,10 @@ func _fire(dir: Vector2) -> void:
 	var lvl := int(game.turret_level)
 	var sync_mult := 0.78 if (game.has_method("has_perk") and game.has_perk("turret_sync") and game.player != null and float(game.player.fired_kick) > 0.05) else 1.0
 	var rate: float = game.events.turret_rate() * sync_mult
+	if game.player != null and "volt_rate_mult" in game.player:
+		rate /= float(game.player.volt_rate_mult)
+	if overclock_t > 0.0:
+		rate /= 2.0
 	var muzzle: Vector2 = position + Vector2(0, -9) + dir * 13.0
 	match turret_type:
 		"frost":
@@ -213,3 +263,11 @@ func _draw() -> void:
 	if _bar_t > 0.0:
 		draw_rect(Rect2(-7, -22, 14, 2), Color(0, 0, 0, 0.8))
 		draw_rect(Rect2(-7, -22, 14.0 * hp / max_hp, 2), Color("#70e090"))
+	if freeze_t > 0.0:
+		var ice := Color("#c8f4ff")
+		var crystal := Vector2(4, -10)
+		for i in 3:
+			var arm := Vector2.from_angle(PI * i / 3.0) * 3.0
+			draw_line(crystal - arm, crystal + arm, ice, 1.0)
+		draw_rect(Rect2(-7, -26, 14, 2), Color(0, 0, 0, 0.8))
+		draw_rect(Rect2(-7, -26, 14.0 * freeze_t / _freeze_duration, 2), ice)

@@ -684,7 +684,7 @@ func _on_boss_spawn(z: Variant) -> void:
 
 func _play_boss_music() -> void:
 	if boss_rush:
-		Sfx.play_music("final_boss" if wave == GameData.boss_rush_wave_count() else "boss")
+		Sfx.play_music("final_boss" if wave >= GameData.boss_rush_wave_count() else "boss")
 		return
 	# 连杀音效和扩充曲目由同一版音频脚本提供。
 	Sfx.play_music("final_boss" if wave >= GameData.MAX_WAVE and Sfx.has_method("play_kill") else "boss")
@@ -812,14 +812,14 @@ func _wave_cleared() -> void:
 	coins_earned += bonus
 	score += 100 * wave + roundi(base.hp / base.max_hp * 100.0) * wave
 	Sfx.play("wave_clear")
-	Sfx.play_music("menu")
 	_tween_tint(_map_tint)
-	if boss_rush and wave == GameData.boss_rush_wave_count():
+	if boss_rush and wave >= GameData.boss_rush_wave_count():
 		victory = true
 		pickups.collect_all()
 		Save.record_boss_rush(time_alive)
-		_finish_game("八大 Boss 全部击破！")
+		_finish_game("全部 %d 位 Boss 击破！" % GameData.boss_rush_wave_count())
 		return
+	Sfx.play_music("menu")
 	if not boss_rush and wave >= GameData.MAX_WAVE and not endless:
 		victory = true
 		pickups.collect_all()
@@ -963,6 +963,37 @@ func remove_zombie(z: Variant) -> void:
 
 func remove_turret(t: Variant) -> void:
 	turrets.erase(t)
+
+
+func overclock_all_turrets(seconds: float) -> void:
+	var overclocked := false
+	for t: Variant in turrets:
+		if t.alive:
+			t.apply_overclock(seconds)
+			overclocked = true
+	if overclocked:
+		fx.text(player.position + Vector2(0, -22), "炮塔超频！", Color("#ffd850"))
+		Sfx.play("overdrive" if Sfx._streams.has("overdrive") else "buy", -6.0)
+
+
+func freeze_turrets_near(pos: Vector2, radius: float, seconds: float) -> void:
+	var radius_squared := radius * radius
+	for t: Variant in turrets:
+		if t.alive and pos.distance_squared_to(t.position) <= radius_squared:
+			t.apply_freeze(seconds)
+
+
+func thaw_all_turrets() -> void:
+	for t: Variant in turrets:
+		if t.alive and t.freeze_t > 0.0:
+			t.thaw()
+
+
+func jam_turrets_near(pos: Vector2, radius: float, seconds: float) -> void:
+	var radius_squared := radius * radius
+	for t: Variant in turrets:
+		if t.alive and pos.distance_squared_to(t.position) <= radius_squared:
+			t.apply_local_jam(seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -1186,7 +1217,10 @@ func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool,
 	var radius: float = explode_radius * events.splash_mult
 	var self_damage_mult := 0.6 if friendly else 1.0
 	# 目前只有玩家的手雷和榴弹同时标记为友方且保护基地。
-	if friendly and spare_base:
+	var from_player := friendly and spare_base
+	if from_player:
+		if player != null and "magma_fire_mult" in player:
+			damage *= float(player.magma_fire_mult)
 		if hero_id == "demo":
 			radius *= 1.2
 			self_damage_mult *= 0.5
@@ -1209,7 +1243,7 @@ func explode(pos: Vector2, damage: float, explode_radius: float, friendly: bool,
 			var falloff := 1.0 - clampf(d / (radius + 12.0), 0.0, 0.7)
 			var mult := 2.2 if friendly else 1.4
 			# 战利品「掘地晶石」：玩家的爆炸打 Boss 更疼
-			if friendly and z.is_boss:
+			if friendly and z.is_boss and player != null:
 				mult *= player.blast_boss_mult
 			if heavy != 1.0 and (z.kind == "tank" or (z.is_boss and z.armored())):
 				mult *= heavy
